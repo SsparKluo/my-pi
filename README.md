@@ -97,10 +97,8 @@ A [pi-cc-header](https://github.com/eriiic7z/pi-cc-header)–style startup heade
 
 ### editor
 
-![editor](https://github.com/user-attachments/assets/37fdd8a3-f924-4829-a4eb-ad9b2f42c187)
-
-- **Composer** — codex-style input area with a bold `❯` prompt (highlighted in `!bash` mode)
-- **Skill mentions** — `$skill` mentions render bold in the theme accent; typing `$` opens the mention picker with all indexed skills (agents, codex, claude, pi); unknown `$tokens` are left untouched
+- **Mode-colored border** — the `─` border is recolored by input mode: `!` → bashMode, `!!` → dim (matching the corresponding history blocks); plain input uses dim (the footer's token-stat color). The editor itself is pi's native input box.
+- **Skill mentions** — `$skill` mentions render bold in the theme accent; typing `$` opens the mention picker with all indexed skills (agents, codex, claude, pi); unknown `$tokens` are left untouched.
 
 **File:** `editor.ts`
 

@@ -1,22 +1,16 @@
 /**
- * Codex Composer + `$skill` Mention Highlighting
+ * `$skill` Mentions + Mode-Colored Border
  *
- * Two features layered on the pi input editor:
+ * The editor is pi's native input box, untouched except for the `─` border
+ * color (by input mode) and codex-style `$skill` mentions:
  *
- * ── 1. Codex Composer restyle ──────────────────────────────────────────────
- * The default pi editor draws its chrome as top/bottom `─` border lines. Codex
- * instead draws the composer as a single filled panel: a solid background
- * rectangle with the text inset by one row (top/bottom) and two columns (left),
- * and a bold prompt sitting in the left gutter of the first text line. (Codex
- * uses `›`; this extension uses its heavy variant `❯`, which reads larger.)
+ * ── Mode-colored border ───────────────────────────────────────────────────
+ * The `─` border is recolored by input mode:
+ *   `!`  → bashMode      (normal bash block, like history)
+ *   `!!` → dim           (excluded-from-context bash block, like history)
+ *   plain → dim          (same color as the footer's token-stat text ↑↓R…)
  *
- * Codex fills the composer with the same background it uses for user messages
- * (`user_message_style()` in codex-rs/tui/src/style.rs). This extension does the
- * same via pi's `userMessageBg` theme token, so the panel is a subtle neutral
- * surface that adapts to dark themes (slightly lighter than the background) and
- * light themes (slightly darker) automatically, exactly like Codex.
- *
- * ── 2. `$skill` mention highlighting + completion (codex-style) ───────────
+ * ── `$skill` mention highlighting + completion (codex-style) ──────────────
  * While typing, any `$name` token that resolves to a skill is rendered bold in
  * the theme's accent color, mirroring how Codex's composer surfaces skill
  * mentions (`$codex-reapply`, `$codex-review`, ...). Unknown `$tokens` are left
@@ -62,8 +56,6 @@
  * new skills and `/reload` (or start a new session) to refresh it. Rendering is
  * ANSI-aware: tokens keep their highlight even when the editor's inverted
  * cursor sits on a character inside the token.
- *
- * Usage: pi --extension ./examples/extensions/codex-composer.ts
  */
 
 import { existsSync, readdirSync, readFileSync, statSync, type Dirent } from "node:fs";
@@ -85,17 +77,7 @@ import {
 	SelectList,
 	type SelectListLayoutOptions,
 	type TUI,
-	visibleWidth,
 } from "@earendil-works/pi-tui";
-
-// Codex insets the textarea by two columns on the left (LIVE_PREFIX_COLS) and
-// draws the prompt in that gutter. We reserve the same space via paddingX. `❯`
-// (U+276F) is the heavy variant of Codex's `›` — the same shape but visually
-// larger, and still a single column wide.
-const PROMPT_CHAR = "❯";
-const PROMPT_GUTTER_COLS = 2;
-
-const RESET_BG = "\x1b[49m";
 
 /**
  * Layout for the `$skill` picker list. pi's default SelectList column is 32
@@ -611,7 +593,7 @@ export function highlightSkillTokens(line: string, index: Map<string, SkillEntry
 // Editor
 // ============================================================================
 
-export class CodexComposer extends CustomEditor {
+export class SkillHighlightEditor extends CustomEditor {
 	private piTheme: Theme;
 	private skillIndex: Map<string, SkillEntry>;
 	/** Last caret/token state probed by probeSkillAutocomplete (dedupe). */
@@ -624,7 +606,7 @@ export class CodexComposer extends CustomEditor {
 		theme: Theme,
 		skillIndex: Map<string, SkillEntry>,
 	) {
-		super(tui, editorTheme, keybindings, { paddingX: PROMPT_GUTTER_COLS });
+		super(tui, editorTheme, keybindings);
 		this.piTheme = theme;
 		this.skillIndex = skillIndex;
 
@@ -684,30 +666,6 @@ export class CodexComposer extends CustomEditor {
 		editor.tryTriggerAutocomplete();
 	}
 
-	// The app syncs paddingX from user settings; keep enough left gutter for the
-	// prompt no matter what it requests.
-	override setPaddingX(padding: number): void {
-		super.setPaddingX(Math.max(PROMPT_GUTTER_COLS, padding));
-	}
-
-	// Fill a single row with the panel background. Border `─` glyphs become
-	// spaces so the former border rows read as solid top/bottom padding, while
-	// any scroll-indicator text ("↑ 3 more") is preserved on the fill.
-	private fillRow(line: string, width: number, bg: string): string {
-		// A theme may define userMessageBg as the default terminal background
-		// (""), which resolves to a bare bg reset. In that case leave the row
-		// untouched instead of blanking the borders.
-		if (bg === "" || bg === RESET_BG) {
-			return line;
-		}
-		let row = line.replace(/─/g, " ");
-		// A full reset (e.g. after the inverted cursor glyph) drops the
-		// background, so re-assert it to keep the fill continuous.
-		row = row.replace(/\x1b\[0m/g, `\x1b[0m${bg}`);
-		const pad = visibleWidth(row) < width ? " ".repeat(width - visibleWidth(row)) : "";
-		return `${bg}${row}${pad}${RESET_BG}`;
-	}
-
 	// Highlight `$skill` mentions on the text rows (between the top border and
 	// the bottom border; autocomplete rows rendered below stay untouched).
 	private highlightSkills(lines: string[], bottomBorder: number): void {
@@ -723,56 +681,33 @@ export class CodexComposer extends CustomEditor {
 		// moveCursor). No-op while a picker is open or the probe key is unchanged.
 		this.probeSkillAutocomplete();
 
+		// Recolor the `─` border by input mode. The editor chrome is otherwise
+		// pi's native rendering; only the border color is swapped, then restored
+		// so pi keeps owning this field.
+		//   `!`  → bashMode   (normal bash block, like history)
+		//   `!!` → dim        (excluded-from-context bash block, like history)
+		//   plain → dim       (same color as the footer's token-stat text ↑↓R…)
+		const piBorder = this.borderColor;
+		const trimmed = this.getText().trimStart();
+		if (trimmed.startsWith("!") && !trimmed.startsWith("!!")) {
+			this.borderColor = (s: string) => this.piTheme.fg("bashMode", s);
+		} else {
+			this.borderColor = (s: string) => this.piTheme.fg("dim", s);
+		}
+
 		const lines = super.render(width);
+		this.borderColor = piBorder;
+
 		if (lines.length < 2) {
 			return lines;
 		}
 
-		// Same background pi uses for user messages, matching Codex's composer.
-		// It is defined per theme, so dark and light themes each get a suitable
-		// panel without any color math here.
-		const bg = this.piTheme.getBgAnsi("userMessageBg");
-
-		// The composer is everything up to and including the bottom border. The
-		// bottom border is the last row that still contains a `─` glyph; any
-		// autocomplete rows rendered after it are left untouched so the popup
-		// keeps its own styling.
+		// Highlight `$skill` mentions on the text rows (between the borders).
 		let bottomBorder = lines.length - 1;
 		while (bottomBorder > 0 && !lines[bottomBorder].includes("─")) {
 			bottomBorder--;
 		}
-
-		// Drop the bold `❯` prompt into the left gutter of the first text row
-		// (the row just below the top border), replacing one padding space so the
-		// row width is unchanged. Codex renders the prompt as bold default-fg.
-		// When the input starts with `!` (bash mode), pi highlights the editor
-		// border with the `bashMode` theme color (green). Since we replaced the
-		// border with a filled panel, we highlight the `❯` prompt instead.
-		const isBashMode = this.getText().trimStart().startsWith("!");
-		const prompt = isBashMode
-			? this.piTheme.fg("bashMode", this.piTheme.bold(PROMPT_CHAR))
-			: this.piTheme.bold(PROMPT_CHAR);
-		lines[1] = `${prompt}${lines[1].slice(1)}`;
-
-		// Fill the whole panel — top border, text rows, and bottom border. Filling
-		// the top and bottom rows (not just the text) is what vertically centers
-		// the text inside the panel and keeps the cursor off the top edge, matching
-		// Codex's inset textarea.
-		for (let i = 0; i <= bottomBorder; i++) {
-			lines[i] = this.fillRow(lines[i], width, bg);
-		}
-
-		// Highlight `$skill` mentions last, after the panel fill: the fill already
-		// re-asserts the background after every `\x1b[0m`, so the highlight only
-		// needs to re-assert its own foreground/bold after resets.
 		this.highlightSkills(lines, bottomBorder);
-
-		// Prepend a single open row so the panel does not sit flush against the
-		// widget above (e.g. the status header). Because the text is centered in
-		// the filled panel below, this one row reads as a subtle gap rather than a
-		// large empty band.
-		lines.unshift("");
-
 		return lines;
 	}
 }
@@ -785,7 +720,7 @@ export default function (pi: ExtensionAPI) {
 		// for this session's working directory, including project-local roots.
 		const skillIndex = buildSkillIndex(ctx.cwd);
 		ctx.ui.setEditorComponent((tui, editorTheme, keybindings) => {
-			return new CodexComposer(tui, editorTheme, keybindings, theme, skillIndex);
+			return new SkillHighlightEditor(tui, editorTheme, keybindings, theme, skillIndex);
 		});
 		// `$skill` mention picker: stack on top of pi's built-in autocomplete
 		// provider, so `@` file attachments, `/` commands and path completion
