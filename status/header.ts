@@ -1,15 +1,12 @@
 /**
  * Status Header Widget Module
  *
- * Renders a rich status line above the editor with:
- * - Model
+ * Renders a compact identity line above the editor with:
+ * - Model + thinking level
  * - Current working directory + git branch
- * - Token statistics (input/output/cache, matching pi's built-in footer)
- * - Cache hit rate (cumulative / last request)
- * - Context usage (percentage / window)
- * - Token generation speed
  *
- * Also provides the /statusline configuration command helpers.
+ * Token stats, cache rate, and TPS live elsewhere (footer / "Worked for"
+ * line) — see status/index.ts. Also provides the /statusline helpers.
  */
 
 import path from "node:path";
@@ -22,7 +19,6 @@ import type {
     ThemeColor,
 } from "@earendil-works/pi-coding-agent";
 import type { GitStatus } from "./git.ts";
-import { TokenSpeedEngine } from "./tps.ts";
 
 // ── Thinking level → theme color ──
 
@@ -54,7 +50,6 @@ export interface StatusLineConfig {
     gitBranch: boolean;
     tokenStats: boolean;
     cacheRate: boolean;
-    contextUsage: boolean;
     tokenSpeed: boolean;
     ttft: boolean;
     thinking: boolean;
@@ -66,7 +61,6 @@ export const DEFAULT_STATUS_CONFIG: StatusLineConfig = {
     gitBranch: true,
     tokenStats: true,
     cacheRate: true,
-    contextUsage: true,
     tokenSpeed: true,
     ttft: true,
     thinking: true,
@@ -170,7 +164,6 @@ export function computeLastCacheRate(ctx: ExtensionContext): number | null {
 
 export interface HeaderRenderData {
     gitStatus: GitStatus | null;
-    tokenSpeedEngine: TokenSpeedEngine;
 }
 
 /**
@@ -228,88 +221,6 @@ export function buildStatusHeader(
         parts.push(theme.fg("text", branchStr));
     }
 
-    // 4. Token stats: ↑ tokens ↓ tokens
-    //
-    // computeTokenStats walks ALL session entries — compute it once and
-    // reuse for both token stats and cache rate. Recomputing per section
-    // triples the per-render cost and pins the event loop on long sessions.
-    const stats = (config.tokenStats || config.cacheRate)
-        ? computeTokenStats(ctx)
-        : null;
-    if (config.tokenStats && stats) {
-        const statStrs: string[] = [];
-        if (stats.totalInput)
-            statStrs.push(`\u2191${formatTokens(stats.totalInput)}`);
-        if (stats.totalOutput)
-            statStrs.push(`\u2193${formatTokens(stats.totalOutput)}`);
-        if (stats.totalCacheRead)
-            statStrs.push(`R${formatTokens(stats.totalCacheRead)}`);
-        if (stats.totalCacheWrite)
-            statStrs.push(`W${formatTokens(stats.totalCacheWrite)}`);
-        if (statStrs.length > 0) {
-            parts.push(theme.fg("muted", statStrs.join(" ")));
-        }
-    }
-
-    // 4b. Cache hit rate: cumulative / last request
-    // Only show when usage data is available (e.g. after at least one assistant response).
-    // On /reload or resume, session data loaded from disk provides the same source.
-    if (config.cacheRate && stats) {
-        const hasUsageData = stats.totalInput > 0 || stats.totalCacheRead > 0;
-        if (hasUsageData) {
-            const cumDenom = stats.totalCacheRead + stats.totalInput;
-            const cumRate = cumDenom > 0 ? stats.totalCacheRead / cumDenom : 0;
-            const lastRate = computeLastCacheRate(ctx);
-            const cumPct = (cumRate * 100).toFixed(1);
-            const lastPct =
-                lastRate !== null ? (lastRate * 100).toFixed(1) : "—";
-            const cacheStr = `Cache ${cumPct}%/last ${lastPct}%`;
-            parts.push(theme.fg("muted", cacheStr));
-        }
-    }
-
-    // 5. Context usage: 54%/128K or colored at high thresholds
-    if (config.contextUsage) {
-        const usage = ctx.getContextUsage();
-        const contextWindow =
-            usage?.contextWindow ?? ctx.model?.contextWindow ?? 0;
-        const contextPct = usage?.percent;
-        const contextTokens = usage?.tokens;
-        let ctxStr: string;
-        if (
-            contextPct !== null &&
-            contextPct !== undefined &&
-            contextTokens !== null &&
-            contextTokens !== undefined
-        ) {
-            ctxStr = `${contextPct.toFixed(0)}% ${formatTokens(contextTokens)}/${formatTokens(contextWindow)}`;
-        } else if (contextPct !== null && contextPct !== undefined) {
-            ctxStr = `${contextPct.toFixed(0)}%/${formatTokens(contextWindow)}`;
-        } else {
-            ctxStr = `?/${formatTokens(contextWindow)}`;
-        }
-        if (contextPct !== null && contextPct !== undefined) {
-            if (contextPct > 90) {
-                parts.push(theme.fg("error", ctxStr));
-            } else if (contextPct > 70) {
-                parts.push(theme.fg("warning", ctxStr));
-            } else {
-                parts.push(theme.fg("muted", ctxStr));
-            }
-        } else {
-            parts.push(theme.fg("muted", ctxStr));
-        }
-    }
-
-    // 6. Token speed + TTFT (no separator between them, both accent colour)
-    if (config.tokenSpeed && data.tokenSpeedEngine.tps > 0) {
-        let speedStr = `\u{F04C5} ${data.tokenSpeedEngine.tps.toFixed(0)} t/s`;
-        if (config.ttft && data.tokenSpeedEngine.ttftSec > 0) {
-            speedStr += ` TTFT ${data.tokenSpeedEngine.ttftSec.toFixed(1)}s`;
-        }
-        parts.push(theme.fg("accent", speedStr));
-    }
-
     if (parts.length === 0) return [""];
     const line = parts.join(sep);
     return [line];
@@ -336,23 +247,18 @@ export const STATUSLINE_ITEMS: Array<{
     {
         id: "tokenStats",
         label: "token-stats",
-        description: "Input/output/cache token counts",
+        description: "Input/output/cache token counts (footer)",
     },
     {
         id: "cacheRate",
         label: "cache-rate",
-        description: "Cache hit rate (cumulative / last request)",
-    },
-    {
-        id: "contextUsage",
-        label: "context-usage",
-        description: "Context window usage percentage",
+        description: "Cache hit rate: cumulative (footer) + last (worked-for)",
     },
     {
         id: "tokenSpeed",
         label: "token-speed",
-        description: "Token generation speed",
+        description: "Token generation speed (worked-for line)",
     },
-    { id: "ttft", label: "ttft", description: "Time to first token" },
+    { id: "ttft", label: "ttft", description: "Time to first token (worked-for line)" },
     { id: "thinking", label: "thinking", description: "Thinking level" },
 ];

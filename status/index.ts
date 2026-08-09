@@ -18,6 +18,7 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type {
   ExtensionAPI,
   ExtensionContext,
+  ReadonlyFooterDataProvider,
   SessionEntry,
   Theme,
 } from "@earendil-works/pi-coding-agent";
@@ -26,6 +27,9 @@ import type { TUI } from "@earendil-works/pi-tui";
 import {
   loadStatusConfig,
   buildStatusHeader,
+  computeTokenStats,
+  computeLastCacheRate,
+  formatTokens,
 } from "./header.ts";
 import { registerStatuslineCommand } from "./statusline.ts";
 import {
@@ -107,12 +111,62 @@ function createInitialState(): AppState {
   };
 }
 
-// ── Empty footer (hides pi's built-in footer) ──
+// ── Footer: context/usage line (below the editor) ──
+//
+// One line combining Magic Context usage + state (published via
+// ctx.ui.setStatus, read back through footerData.getExtensionStatuses()),
+// pi token stats, and the cumulative cache hit rate. The mc text bundles
+// context tokens/% with mc's own state (idle/historian/recomp/
+// ⚠ historian failed); we drop its "mc:" prefix and tag usage with a
+// nerd-font tachometer icon. Empty when there is nothing to show.
 
-const emptyFooter = () => ({
-  render: () => [] as string[],
-  invalidate: () => {},
-});
+const MAGIC_CONTEXT_STATUS_KEY = "magic-context";
+
+function createFooterFactory(
+  ctx: ExtensionContext,
+  configRef: { current: StatusLineConfig },
+) {
+  return (_tui: TUI, theme: Theme, footerData: ReadonlyFooterDataProvider) => ({
+    render: (width: number): string[] => {
+      const config = configRef.current;
+      const parts: string[] = [];
+
+      const raw = footerData
+        .getExtensionStatuses()
+        .get(MAGIC_CONTEXT_STATUS_KEY);
+      if (raw) {
+        const body = raw.startsWith("mc: ") ? raw.slice(4) : raw;
+        parts.push(`\u{F0E4} ${body}`);
+      }
+
+      const stats =
+        config.tokenStats || config.cacheRate ? computeTokenStats(ctx) : null;
+      if (config.tokenStats && stats) {
+        const ss: string[] = [];
+        if (stats.totalInput) ss.push(`\u2191${formatTokens(stats.totalInput)}`);
+        if (stats.totalOutput) ss.push(`\u2193${formatTokens(stats.totalOutput)}`);
+        if (stats.totalCacheRead) ss.push(`R${formatTokens(stats.totalCacheRead)}`);
+        if (stats.totalCacheWrite) ss.push(`W${formatTokens(stats.totalCacheWrite)}`);
+        if (ss.length > 0) parts.push(ss.join(" "));
+      }
+      if (
+        config.cacheRate &&
+        stats &&
+        (stats.totalInput > 0 || stats.totalCacheRead > 0)
+      ) {
+        const denom = stats.totalCacheRead + stats.totalInput;
+        const cum = denom > 0 ? (stats.totalCacheRead / denom) * 100 : 0;
+        parts.push(`Cache ${cum.toFixed(0)}%`);
+      }
+
+      if (parts.length === 0) return [];
+      const sep = theme.fg("borderMuted", " │ ");
+      const line = parts.map((p) => theme.fg("muted", p)).join(sep);
+      return [truncateToWidth(line, width)];
+    },
+    invalidate: () => {},
+  });
+}
 
 // ── Helpers ──
 
@@ -157,7 +211,7 @@ function startWorkingMessage(ctx: ExtensionContext, state: AppState) {
     // fights pi's indicator state machine and drives a near-continuous
     // render loop. Because every render recomputes the status header — which
     // walks all session entries (computeTokenStats x2 + computeLastCacheRate)
-    // plus getContextUsage() — the event loop gets pinned on long sessions
+    // — the event loop gets pinned on long sessions
     // and the TUI becomes unresponsive ("卡死"). Letting pi own the loader
     // and only updating the text removes the conflict entirely.
     ctx.ui.setWorkingMessage(formatDuration(Date.now() - state.agentStartMs, "Working for"));
@@ -296,7 +350,18 @@ function createWidgetFactory(
         // asynchronously and must always re-compute on re-render.
         const lines: string[] = [];
         if (state.lastAgentDuration) {
-          const text = `Worked for ${state.lastAgentDuration}`;
+          const segs = [`Worked for ${state.lastAgentDuration}`];
+          if (config.tokenSpeed && state.tokenSpeedEngine.tps > 0) {
+            segs.push(`${state.tokenSpeedEngine.tps.toFixed(0)} t/s`);
+          }
+          if (config.ttft && state.tokenSpeedEngine.ttftSec > 0) {
+            segs.push(`TTFT ${state.tokenSpeedEngine.ttftSec.toFixed(1)}s`);
+          }
+          if (config.cacheRate) {
+            const lastRate = computeLastCacheRate(ctx);
+            if (lastRate !== null) segs.push(`cache ${(lastRate * 100).toFixed(0)}%`);
+          }
+          const text = segs.join(" · ");
           const plainLeft = `─ ${text} ─`;
           const fillerCount = width - 2 - visibleWidth(plainLeft);
           const filler = fillerCount > 0 ? theme.fg("dim", "─".repeat(fillerCount)) : "";
@@ -305,7 +370,6 @@ function createWidgetFactory(
         }
         const statusLines = buildStatusHeader(pi, ctx, {
           gitStatus: state.gitStatus,
-          tokenSpeedEngine: state.tokenSpeedEngine,
         }, config, theme);
         for (const l of statusLines) {
           lines.push(truncateToWidth(l, width, theme.fg("dim", "...")));
@@ -471,8 +535,8 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     if (!ctx.hasUI) return;
 
-    // Hide built-in footer
-    ctx.ui.setFooter(emptyFooter);
+    // Footer: context/usage line below the editor
+    ctx.ui.setFooter(createFooterFactory(ctx, configRef));
 
     state.isAutoTitling = false;
     state.isRetrying = false;
