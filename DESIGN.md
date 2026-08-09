@@ -40,7 +40,7 @@ AI bash classifier.
 | Q2 | Standalone; flat permission format (`allow`/`deny`/`ask`/`classify`, last-match-wins). |
 | Q3 | `permission` block optional (omit → prompt-only). `classify` is a first-class action. Global `commandWrappers`. |
 | Q4 | Three optional prompt fields: `onEnterPrompt`, `onExitPrompt` (stored messages), `perTurnPrompt` (ephemeral system-prompt append). State persisted via session entry. |
-| Q5 | Broadcast `pi-mode:changed` event + footer status line + session-entry-readable. UX: `--mode` flag, `/mode` command + selector, cycle shortcut. No service accessor yet. |
+| Q5 | Broadcast `pi-mode:changed` event + footer status line + session-entry-readable. UX: `--pi-mode` flag, `/mode` command + selector, cycle shortcut. No service accessor yet. |
 | Q6 | Classifier via `modelRegistry.complete`; per-unit classify, most-restrictive-wins; deny-floor before classifier; `fallback: deny`; session cache; `wholeCommandThreshold`. |
 | Q7 | Ask dialog = custom TUI (`ctx.ui.custom`); codeblock, foldable, max-height internal scroll; session approvals record the matched pattern; fail-closed non-interactive deny. |
 | §38 | `unbash` parses bash to AST before classification. |
@@ -105,7 +105,7 @@ src/
   bash.ts         # unbash cascade: parse → wrapper-strip → unit eval → classifier dispatch
   classifier.ts   # modelRegistry.complete call, context assembly, cache, fallback
   ask.ts          # custom TUI dialog (ctx.ui.custom) + session-approval store
-  commands.ts     # /mode command + selector, cycle shortcut, --mode flag
+  commands.ts     # /mode command + selector, cycle shortcut, --pi-mode flag
 ```
 
 Layers (each an independently runnable/verifiable slice):
@@ -122,7 +122,7 @@ Layers (each an independently runnable/verifiable slice):
 (reason `startup`/`resume`/`reload`) via `ctx.sessionManager.getEntries()`; falls
 back to `defaultMode` then `normal`.
 
-**Switching** (`--mode <name>` flag, `/mode` selector, `/mode <name>`, cycle shortcut):
+**Switching** (`--pi-mode <name>` flag, `/mode` selector, `/mode <name>`, cycle shortcut):
 1. If leaving a mode with `onExitPrompt` → inject via `pi.sendMessage` (stored).
 2. Update current mode; persist session entry.
 3. If entering a mode with `onEnterPrompt` → inject via `pi.sendMessage`.
