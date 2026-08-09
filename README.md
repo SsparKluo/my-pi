@@ -61,19 +61,18 @@ cp -r /tmp/pi-extensions/status/ ~/.pi/agent/extensions/status/
 
 ### status
 
-A comprehensive status bar suite with multiple modules:
+A status display split across three zones: an identity **header** above the editor, a context/usage **footer** below it, and a per-turn **"Worked for"** line.
 
 | Module | Description |
 |--------|-------------|
-| **index.ts** | Main extension entry point, orchestrates all status modules |
-| **header.ts** | Rich status header above the editor showing model, working directory + git branch, token statistics, context usage, generation speed, and TTFT |
+| **index.ts** | Entry point. Renders the footer (Magic Context usage + state, pi token stats, cumulative cache hit rate) and the post-turn "Worked for" line (duration + TPS + TTFT + last-request cache rate). Orchestrates the other modules. |
+| **header.ts** | Identity header above the editor — model + thinking level, working directory, git branch. Also hosts the `/statusline` config items and the token-stats / cache-rate helpers. |
 | **git.ts** | Git status detection — branch name, ahead/behind counts, staged/modified/deleted/conflicted/untracked file counts |
-| **tps.ts** | Token speed engine — real-time TPS estimation during streaming, accurate TPS after completion, TTFT measurement |
+| **tps.ts** | Token-speed engine — end-to-end TPS (provider output tokens / full-turn wall time, computed once at `finish()`) and TTFT (HTTP request → first token). No live estimate. |
 | **title.ts** | Animated terminal title with a braille spinner during agent activity |
-| **theme.ts** | Cross-platform system dark/light mode detection and automatic pi theme switching |
-| **statusline.ts** | `/statusline` command for interactive configuration of which items appear in the header |
+| **statusline.ts** | `/statusline` command for interactively toggling which items appear across the three zones |
 
-**Files:** `status/index.ts`, `status/header.ts`, `status/git.ts`, `status/tps.ts`, `status/title.ts`, `status/theme.ts`, `status/statusline.ts`
+**Files:** `status/index.ts`, `status/header.ts`, `status/git.ts`, `status/tps.ts`, `status/title.ts`, `status/statusline.ts`
 
 ---
 
