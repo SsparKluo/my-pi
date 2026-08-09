@@ -12,6 +12,7 @@
 		"request-logger.ts",
 		"shortcuts.ts",
 		"429-retry.ts",
+		"startup-header.ts",
 		"status/"
 	],
 	"pi": {
@@ -20,6 +21,7 @@
 			"./request-logger.ts",
 			"./shortcuts.ts",
 			"./429-retry.ts",
+			"./startup-header.ts",
 			"./status/"
 		]
 	}

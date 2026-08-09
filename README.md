@@ -77,6 +77,24 @@ A comprehensive status bar suite with multiple modules:
 
 ---
 
+### startup-header
+
+A [pi-cc-header](https://github.com/eriiic7z/pi-cc-header)–style startup header for pi: an **animated pixel-art Pi logo** on the left (Clawd crab red, 4-level gradient + IBM stripes, 14-frame animation) with a compact info panel on the right. Stripped to essentials — no model/effort line, no slogan, no config commands.
+
+```
+  [pixel Pi logo]   Pi v0.x
+                    2 context | 0·0 skills | 14 extensions | 0 prompts
+                    ~/your/cwd
+                    Press ctrl+o to show full startup help and loaded resources.
+```
+
+- **Counts** — context files (`AGENTS`/`CLAUDE` + `SYSTEM` + `APPEND_SYSTEM`), skills as **global·local** (pkg merged into global), extensions, prompts; items separated by `|`. Best-effort filesystem scan mirroring pi's own discovery rules.
+- **ctrl+o** — sets `quietStartup` in `~/.pi/agent/settings.json` to hide pi's verbose native loaded-resources panel, then expands the header to show the detailed loaded-resources breakdown (context files, skills by scope, extensions, prompts). Restore the native panel with `"quietStartup": false`.
+
+**File:** `startup-header.ts`
+
+---
+
 ### editor
 
 ![editor](https://github.com/user-attachments/assets/37fdd8a3-f924-4829-a4eb-ad9b2f42c187)
