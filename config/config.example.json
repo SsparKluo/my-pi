@@ -17,8 +17,8 @@
         "grep": "allow",
         "find": "allow",
         "ls": "allow",
-        "write": { "**/*.md": "allow", "*": "deny" },
-        "edit": { "**/*.md": "allow", "*": "deny" },
+        "write": { "*": "deny", "**/*.md": "allow" },
+        "edit": { "*": "deny", "**/*.md": "allow" },
         "bash": {
           "*": "deny",
           "ls": "allow",
