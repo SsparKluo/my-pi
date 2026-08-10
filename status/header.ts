@@ -50,6 +50,7 @@ export interface StatusLineConfig {
     gitBranch: boolean;
     tokenStats: boolean;
     cacheRate: boolean;
+    tokenUsage: boolean;
     tokenSpeed: boolean;
     ttft: boolean;
     thinking: boolean;
@@ -61,6 +62,7 @@ export const DEFAULT_STATUS_CONFIG: StatusLineConfig = {
     gitBranch: true,
     tokenStats: true,
     cacheRate: true,
+    tokenUsage: true,
     tokenSpeed: true,
     ttft: true,
     thinking: true,
@@ -152,6 +154,40 @@ export function computeLastCacheRate(ctx: ExtensionContext): number | null {
                 const denom = cr + inp;
                 if (denom === 0) return null;
                 return cr / denom;
+            }
+        }
+    } catch {
+        /* session not ready */
+    }
+    return null;
+}
+
+/**
+ * Compute the last assistant message's token usage (input/output/cacheRead/cacheWrite).
+ * Returns null when there is no usage data.
+ */
+export function computeLastUsage(ctx: ExtensionContext): {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+} | null {
+    try {
+        const entries = ctx.sessionManager.getEntries();
+        for (let i = entries.length - 1; i >= 0; i--) {
+            const entry = entries[i];
+            if (
+                entry.type === "message" &&
+                entry.message?.role === "assistant" &&
+                entry.message.usage
+            ) {
+                const u = entry.message.usage;
+                return {
+                    input: u.input || 0,
+                    output: u.output || 0,
+                    cacheRead: u.cacheRead || 0,
+                    cacheWrite: u.cacheWrite || 0,
+                };
             }
         }
     } catch {
@@ -253,6 +289,11 @@ export const STATUSLINE_ITEMS: Array<{
         id: "cacheRate",
         label: "cache-rate",
         description: "Cache hit rate: cumulative (footer) + last (worked-for)",
+    },
+    {
+        id: "tokenUsage",
+        label: "token-usage",
+        description: "Per-turn token usage (worked-for line)",
     },
     {
         id: "tokenSpeed",

@@ -29,6 +29,7 @@ import {
   buildStatusHeader,
   computeTokenStats,
   computeLastCacheRate,
+  computeLastUsage,
   formatTokens,
 } from "./header.ts";
 import { registerStatuslineCommand } from "./statusline.ts";
@@ -358,6 +359,17 @@ function createWidgetFactory(
           }
           if (config.ttft && state.tokenSpeedEngine.ttftSec > 0) {
             segs.push(`TTFT ${state.tokenSpeedEngine.ttftSec.toFixed(1)}s`);
+          }
+          if (config.tokenUsage) {
+            const lastUsage = computeLastUsage(ctx);
+            if (lastUsage) {
+              const tokSegs: string[] = [];
+              if (lastUsage.input) tokSegs.push(`\u2191${formatTokens(lastUsage.input)}`);
+              if (lastUsage.output) tokSegs.push(`\u2193${formatTokens(lastUsage.output)}`);
+              if (lastUsage.cacheRead) tokSegs.push(`R${formatTokens(lastUsage.cacheRead)}`);
+              if (lastUsage.cacheWrite) tokSegs.push(`W${formatTokens(lastUsage.cacheWrite)}`);
+              if (tokSegs.length > 0) segs.push(tokSegs.join(" "));
+            }
           }
           if (config.cacheRate) {
             const lastRate = computeLastCacheRate(ctx);
