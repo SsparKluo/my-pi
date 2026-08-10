@@ -14,7 +14,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { complete } from "@earendil-works/pi-ai/compat";
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -56,6 +56,46 @@ function formatTimestamp(ms: number): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
+function formatDurationOnly(ms: number): string {
+  const total = Math.round(ms / 1000);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return [h > 0 && `${h}h`, m > 0 && `${m}m`, `${s}s`].filter(Boolean).join(" ");
+}
+
+// ── Entry renderer ──
+
+interface WorkedForData {
+  timestamp: number;
+  durationMs: number;
+  tps: number;
+  ttftSec: number;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  cacheRate: number | null;
+}
+
+function renderWorkedForEntry(
+  entry: { data?: WorkedForData },
+  _opts: { expanded: boolean },
+  theme: Theme,
+) {
+  const d = entry.data;
+  if (!d) return new Text(theme.fg("dim", "worked-for"), 0, 0);
+  const segs: string[] = [formatTimestamp(d.timestamp), formatDurationOnly(d.durationMs)];
+  if (d.tps > 0) segs.push(`${d.tps.toFixed(0)} t/s`);
+  if (d.ttftSec > 0) segs.push(`TTFT ${d.ttftSec.toFixed(1)}s`);
+  if (d.input) segs.push(`\u2191${formatTokens(d.input)}`);
+  if (d.output) segs.push(`\u2193${formatTokens(d.output)}`);
+  if (d.cacheRead) segs.push(`R${formatTokens(d.cacheRead)}`);
+  if (d.cacheWrite) segs.push(`W${formatTokens(d.cacheWrite)}`);
+  if (d.cacheRate !== null) segs.push(`cache ${(d.cacheRate * 100).toFixed(0)}%`);
+  return new Text(theme.fg("dim", segs.join(" \u00B7 ")), 0, 0);
+}
+
 // ── State ──
 
 interface AppState {
@@ -76,6 +116,7 @@ interface AppState {
   // Status header
   gitStatus: GitStatus | null;
   lastAgentDuration: string | null;
+  lastAgentDurationMs: number | null;
   lastAgentCompletedAt: number | null;
   gitRefreshTimer: ReturnType<typeof setTimeout> | null;
   renderDebounceTimer: ReturnType<typeof setTimeout> | null;
@@ -109,6 +150,7 @@ function createInitialState(): AppState {
     isAutoTitling: false,
     gitStatus: null,
     lastAgentDuration: null,
+    lastAgentDurationMs: null,
     lastAgentCompletedAt: null,
     gitRefreshTimer: null,
     renderDebounceTimer: null,
@@ -266,11 +308,8 @@ function finishWorking(ctx: ExtensionContext, state: AppState) {
   state.agentStartMs = null;
 
   if (elapsedMs !== null) {
-    const total = Math.round(elapsedMs / 1000);
-    const h = Math.floor(total / 3600);
-    const m = Math.floor((total % 3600) / 60);
-    const s = total % 60;
-    state.lastAgentDuration = [h > 0 && `${h}h`, m > 0 && `${m}m`, `${s}s`].filter(Boolean).join(" ");
+    state.lastAgentDuration = formatDuration(Date.now() - state.agentStartMs!, "Working for");
+    state.lastAgentDurationMs = Date.now() - state.agentStartMs!;
     state.lastAgentCompletedAt = Date.now();
   } else {
     ctx.ui.setWorkingMessage();
@@ -363,37 +402,6 @@ function createWidgetFactory(
         // Don't cache by width — state (gitStatus, tokenSpeed, etc.) changes
         // asynchronously and must always re-compute on re-render.
         const lines: string[] = [];
-        if (state.lastAgentDuration) {
-          const ts = state.lastAgentCompletedAt ? formatTimestamp(state.lastAgentCompletedAt) : null;
-          const segs = [ts, state.lastAgentDuration].filter((s): s is string => s !== null);
-          if (config.tokenSpeed && state.tokenSpeedEngine.tps > 0) {
-            segs.push(`${state.tokenSpeedEngine.tps.toFixed(0)} t/s`);
-          }
-          if (config.ttft && state.tokenSpeedEngine.ttftSec > 0) {
-            segs.push(`TTFT ${state.tokenSpeedEngine.ttftSec.toFixed(1)}s`);
-          }
-          if (config.tokenUsage) {
-            const lastUsage = computeLastUsage(ctx);
-            if (lastUsage) {
-              const tokSegs: string[] = [];
-              if (lastUsage.input) tokSegs.push(`\u2191${formatTokens(lastUsage.input)}`);
-              if (lastUsage.output) tokSegs.push(`\u2193${formatTokens(lastUsage.output)}`);
-              if (lastUsage.cacheRead) tokSegs.push(`R${formatTokens(lastUsage.cacheRead)}`);
-              if (lastUsage.cacheWrite) tokSegs.push(`W${formatTokens(lastUsage.cacheWrite)}`);
-              if (tokSegs.length > 0) segs.push(tokSegs.join(" "));
-            }
-          }
-          if (config.cacheRate) {
-            const lastRate = computeLastCacheRate(ctx);
-            if (lastRate !== null) segs.push(`cache ${(lastRate * 100).toFixed(0)}%`);
-          }
-          const text = segs.join(" · ");
-          const plainLeft = `─ ${text} ─`;
-          const fillerCount = width - 2 - visibleWidth(plainLeft);
-          const filler = fillerCount > 0 ? theme.fg("dim", "─".repeat(fillerCount)) : "";
-          lines.push(` ${theme.fg("dim", "─")} ${theme.fg("dim", text)} ${theme.fg("dim", "─")}${filler} `);
-          lines.push(""); // bottom margin
-        }
         const statusLines = buildStatusHeader(pi, ctx, {
           gitStatus: state.gitStatus,
         }, config, theme);
@@ -424,6 +432,27 @@ function updateWidget(
 export default function (pi: ExtensionAPI) {
   const state = createInitialState();
   const configRef = { current: loadStatusConfig() };
+
+  // Durable session entry: per-turn worked-for summary, rendered in the
+  // conversation stream (not sent to LLM, not fixed to any widget).
+  pi.registerEntryRenderer<WorkedForData>("worked-for", renderWorkedForEntry);
+
+  const appendWorkedForEntry = (ctx: ExtensionContext) => {
+    if (state.lastAgentDurationMs === null) return;
+    const usage = computeLastUsage(ctx);
+    const cacheRate = computeLastCacheRate(ctx);
+    pi.appendEntry<WorkedForData>("worked-for", {
+      timestamp: state.lastAgentCompletedAt ?? Date.now(),
+      durationMs: state.lastAgentDurationMs,
+      tps: state.tokenSpeedEngine.tps,
+      ttftSec: state.tokenSpeedEngine.ttftSec,
+      input: usage?.input ?? 0,
+      output: usage?.output ?? 0,
+      cacheRead: usage?.cacheRead ?? 0,
+      cacheWrite: usage?.cacheWrite ?? 0,
+      cacheRate,
+    });
+  };
 
   // ── git refresh helpers ──
 
@@ -637,6 +666,7 @@ export default function (pi: ExtensionAPI) {
 
     // 正常结束：停止计时器，记录总耗时（从 agent_start 到 agent_end）
     finishWorking(ctx, state);
+    appendWorkedForEntry(ctx);
     immediateUpdate(ctx);
     autoGenerateTitle(pi, ctx, state);
     scheduleGitRefresh(ctx.cwd);
@@ -649,6 +679,7 @@ export default function (pi: ExtensionAPI) {
     if (!state.isRetrying) return;
     state.isRetrying = false;
     finishWorking(ctx, state);
+    appendWorkedForEntry(ctx);
     immediateUpdate(ctx);
   });
 
