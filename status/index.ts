@@ -603,11 +603,11 @@ export default function (pi: ExtensionAPI) {
     state.lastAgentDurationMs = null;
     state.lastAgentCompletedAt = null;
 
-    // Use pi's built-in working indicator (accent-colored braille spinner) so
-    // the symbol in front of "Working for XXs" matches pi exactly. We
-    // intentionally do NOT call setWorkingIndicator() with a custom spinner:
-    // overriding it diverges from pi's look and needlessly rebuilds the
-    // loader. The elapsed-time text is supplied via setWorkingMessage().
+    // Re-enable the working indicator. session_shutdown sets it to false
+    // (cleanup), and /reload triggers shutdown→start without pi's own
+    // reset, so without this the spinner never reappears after /reload.
+    ctx.ui.setWorkingVisible(true);
+
     ctx.ui.setTitle(buildIdleTitle(pi));
     syncHerdrTabTitle(pi);
 
