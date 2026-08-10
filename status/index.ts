@@ -48,6 +48,14 @@ import {
   updateTitleFrame,
 } from "./title.ts";
 
+// ── Helpers ──
+
+function formatTimestamp(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 // ── State ──
 
 interface AppState {
@@ -68,6 +76,7 @@ interface AppState {
   // Status header
   gitStatus: GitStatus | null;
   lastAgentDuration: string | null;
+  lastAgentCompletedAt: number | null;
   gitRefreshTimer: ReturnType<typeof setTimeout> | null;
   renderDebounceTimer: ReturnType<typeof setTimeout> | null;
   activeTui: TUI | undefined;
@@ -100,6 +109,7 @@ function createInitialState(): AppState {
     isAutoTitling: false,
     gitStatus: null,
     lastAgentDuration: null,
+    lastAgentCompletedAt: null,
     gitRefreshTimer: null,
     renderDebounceTimer: null,
     activeTui: undefined,
@@ -261,6 +271,7 @@ function finishWorking(ctx: ExtensionContext, state: AppState) {
     const m = Math.floor((total % 3600) / 60);
     const s = total % 60;
     state.lastAgentDuration = [h > 0 && `${h}h`, m > 0 && `${m}m`, `${s}s`].filter(Boolean).join(" ");
+    state.lastAgentCompletedAt = Date.now();
   } else {
     ctx.ui.setWorkingMessage();
     ctx.ui.setWorkingVisible(false);
@@ -353,7 +364,8 @@ function createWidgetFactory(
         // asynchronously and must always re-compute on re-render.
         const lines: string[] = [];
         if (state.lastAgentDuration) {
-          const segs = [`Worked for ${state.lastAgentDuration}`];
+          const ts = state.lastAgentCompletedAt ? formatTimestamp(state.lastAgentCompletedAt) : null;
+          const segs = [ts, state.lastAgentDuration].filter((s): s is string => s !== null);
           if (config.tokenSpeed && state.tokenSpeedEngine.tps > 0) {
             segs.push(`${state.tokenSpeedEngine.tps.toFixed(0)} t/s`);
           }
@@ -556,6 +568,7 @@ export default function (pi: ExtensionAPI) {
     state.isRetrying = false;
 
     state.lastAgentDuration = null;
+    state.lastAgentCompletedAt = null;
 
     // Use pi's built-in working indicator (accent-colored braille spinner) so
     // the symbol in front of "Working for XXs" matches pi exactly. We
@@ -598,6 +611,7 @@ export default function (pi: ExtensionAPI) {
     state.isRetrying = false; // consume the retry flag
     state.isWorking = true;
     state.lastAgentDuration = null;
+    state.lastAgentCompletedAt = null;
     startTitleAnimation(pi, ctx, state);
     // Only reset the timer on fresh starts; retry/continuation attempts keep
     // the same elapsed-time counter running across attempts.
