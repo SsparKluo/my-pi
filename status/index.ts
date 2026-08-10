@@ -43,6 +43,7 @@ import {
   buildIdleTitle,
   startTitleAnimation,
   stopTitleAnimation,
+  syncHerdrTabTitle,
   updateTitleFrame,
 } from "./title.ts";
 
@@ -328,6 +329,7 @@ async function autoGenerateTitle(pi: ExtensionAPI, ctx: ExtensionContext, state:
     if (title && title.length > 0 && title.length <= 80) {
       pi.setSessionName(title);
       if (!state.isWorking) ctx.ui.setTitle(buildIdleTitle(pi));
+      syncHerdrTabTitle(pi);
     }
   } catch { /* best-effort */ }
   finally { state.isAutoTitling = false; }
@@ -549,6 +551,7 @@ export default function (pi: ExtensionAPI) {
     // overriding it diverges from pi's look and needlessly rebuilds the
     // loader. The elapsed-time text is supplied via setWorkingMessage().
     ctx.ui.setTitle(buildIdleTitle(pi));
+    syncHerdrTabTitle(pi);
 
     // Initial git refresh + start fs.watch on .git state
     void doRefreshGit(ctx.cwd);
@@ -595,6 +598,7 @@ export default function (pi: ExtensionAPI) {
     state.isWorking = false;
     stopTitleAnimation(ctx, state);
     ctx.ui.setTitle(buildIdleTitle(pi));
+    syncHerdrTabTitle(pi);
 
     // A run ending in error is normally followed by pi's auto-retry or a
     // compaction continuation. Keep the working timer running so the next

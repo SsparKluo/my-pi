@@ -9,6 +9,7 @@
  * Uses ctx.ui.setTitle() to update the terminal title.
  */
 
+import { execFile } from "node:child_process";
 import path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
@@ -45,6 +46,24 @@ export function buildIdleTitle(pi: ExtensionAPI): string {
   const parts = ["\u03C0", cwd];
   if (session) parts.push(session);
   return parts.join(" \u00B7 ");
+}
+
+// ── Herdr tab title ──
+// Herdr tab labels are set via its socket API (`herdr tab rename`), independent
+// of the OSC terminal title — so ctx.ui.setTitle alone doesn't move the tab.
+// When running inside herdr, mirror the STATIC idle title (no working
+// spinner/status) into the tab. No-op outside herdr.
+const HERDR_TIMEOUT_MS = 800;
+let lastHerdrLabel: string | null = null;
+export function syncHerdrTabTitle(pi: ExtensionAPI): void {
+  const tabId = process.env.HERDR_ENV ? process.env.HERDR_TAB_ID : undefined;
+  if (!tabId) return;
+  const label = buildIdleTitle(pi);
+  if (label === lastHerdrLabel) return;
+  lastHerdrLabel = label;
+  try {
+    execFile("herdr", ["tab", "rename", tabId, label], { timeout: HERDR_TIMEOUT_MS }, () => {});
+  } catch { /* best-effort */ }
 }
 
 // ── Animation lifecycle ──
