@@ -26,10 +26,10 @@ import { type Dirent, existsSync, readdirSync, readFileSync, statSync, writeFile
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 
-// ── Logo visual defaults (pi-cc-header defaults: Clawd crab red, gradient + stripes) ──
-const LOGO_COLOR_KEY = "c";
-const GRADIENT_ON = true;
-const STRIPE_ENABLED = true;
+// ── Logo visual defaults (pi accent teal #8abeb7; Minecraft gradient on, IBM stripes off) ──
+const LOGO_COLOR_KEY = "t";
+const GRADIENT_ON = true;       // Minecraft-style: 4-level truecolor gradient
+const STRIPE_ENABLED = false;   // IBM-style horizontal stripes (── background)
 const LOGO_INTERVAL = 50; // ms per frame
 
 // ── Paths ──
@@ -48,7 +48,7 @@ const LOGO_PIXEL_WIDTH = 14; // 8×2 double-width cells incl. side margins
 
 const CMAP: Record<string, string> = {
     a: "38;2;217;119;87", r: "31", o: "38;5;208", y: "38;5;226",
-    g: "38;2;20;180;20", w: "38;5;15", b: "38;2;40;130;220", p: "38;5;129", c: "38;2;251;73;52",
+    g: "38;2;20;180;20", w: "38;5;15", b: "38;2;40;130;220", p: "38;5;129", t: "38;2;138;190;183",
 };
 const GMAP: Record<string, string[]> = {
     a: ["38;2;217;119;87", "38;2;200;100;70", "38;2;170;80;55", "38;2;130;60;40"],
@@ -59,7 +59,7 @@ const GMAP: Record<string, string[]> = {
     w: ["38;2;230;230;210", "38;2;190;190;170", "38;2;140;140;120", "38;2;100;100;85"],
     b: ["38;2;100;180;255", "38;2;70;160;245", "38;2;40;130;220", "38;2;20;100;195"],
     p: ["38;2;200;100;255", "38;2;170;70;230", "38;2;140;40;200", "38;2;110;20;160"],
-    c: ["38;2;251;73;52", "38;2;220;60;40", "38;2;190;45;30", "38;2;155;30;20"],
+    t: ["38;2;175;210;204", "38;2;138;190;183", "38;2;105;165;158", "38;2;75;135;128"],
 };
 const GRADIENT_LEVEL: Record<string, number> = { l1: 0, l2: 1, l3: 2, l4: 3, s1: 0, s2: 1, s3: 2, s4: 3 };
 
