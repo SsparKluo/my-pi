@@ -216,9 +216,9 @@ export function buildStatusHeader(
     const parts: string[] = [];
     const sep = theme.fg("borderMuted", " \u2502 ");
 
-    // 1. Model + Thinking:  gpt-5.5 low (no separator)
+    // 1. Model + thinking:  openai gpt-5.5 low
     if (config.model && ctx.model) {
-        let modelPart = theme.fg("accent", `\uEE9C ${ctx.model.id}`);
+        let modelPart = theme.fg("accent", `\uEE9C ${ctx.model.provider} ${ctx.model.id}`);
         if (config.thinking && ctx.model.reasoning) {
             const level = pi.getThinkingLevel();
             const thinkColor = THINKING_LEVEL_COLORS[level] ?? "thinkingText";
