@@ -7,7 +7,7 @@
  *   - Turn duration display
  *   - Auto conversation title generation
  *   - Footer: model/path/git above context+token stats (header.ts)
- *   - aboveEditor widget: latest worked-for summary
+ *   - Per-turn worked-for: durable context entry (conversation stream)
  *
  * Replaces the built-in footer to avoid duplication.
  */
@@ -15,7 +15,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { complete } from "@earendil-works/pi-ai/compat";
-import { Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { Text, truncateToWidth } from "@earendil-works/pi-tui";
 import type {
   CustomEntry,
   ExtensionAPI,
@@ -406,74 +406,23 @@ async function autoGenerateTitle(pi: ExtensionAPI, ctx: ExtensionContext, state:
 
 // ── Widget management ──
 
-function createWidgetFactory(
-  ctx: ExtensionContext,
-  state: AppState,
-  config: StatusLineConfig,
-) {
-  return (tui: TUI, theme: Theme) => {
+// The aboveEditor widget renders nothing visible — the worked-for summary
+// lives only in the conversation stream now (appendEntry). The widget still
+// exists solely to capture the TUI handle for requestRender() calls after
+// async git refreshes.
+function createWidgetFactory(state: AppState) {
+  return (tui: TUI) => {
     state.activeTui = tui;
-
     return {
-      render: (width: number) => {
-        // Don't cache by width — state (gitStatus, tokenSpeed, etc.) changes
-        // asynchronously and must always re-compute on re-render.
-        const lines: string[] = [];
-        // Latest turn summary — fixed chrome above the editor. The same data is
-        // also written as a durable context entry (appendEntry) for scrollback.
-        if (state.lastAgentDurationMs !== null) {
-          const ts = state.lastAgentCompletedAt
-            ? formatTimestamp(state.lastAgentCompletedAt)
-            : null;
-          const segs = [
-            ts,
-            formatDurationOnly(state.lastAgentDurationMs),
-          ].filter((s): s is string => s !== null);
-          if (config.tokenSpeed && state.tokenSpeedEngine.tps > 0) {
-            segs.push(`${state.tokenSpeedEngine.tps.toFixed(0)} t/s`);
-          }
-          if (config.ttft && state.tokenSpeedEngine.ttftSec > 0) {
-            segs.push(`TTFT ${state.tokenSpeedEngine.ttftSec.toFixed(1)}s`);
-          }
-          if (config.tokenUsage) {
-            const lastUsage = computeLastUsage(ctx);
-            if (lastUsage) {
-              const tokSegs: string[] = [];
-              if (lastUsage.input) tokSegs.push(`\u2191${formatTokens(lastUsage.input)}`);
-              if (lastUsage.output) tokSegs.push(`\u2193${formatTokens(lastUsage.output)}`);
-              if (lastUsage.cacheRead) tokSegs.push(`R${formatTokens(lastUsage.cacheRead)}`);
-              if (lastUsage.cacheWrite) tokSegs.push(`W${formatTokens(lastUsage.cacheWrite)}`);
-              if (tokSegs.length > 0) segs.push(tokSegs.join(" "));
-            }
-          }
-          if (config.cacheRate) {
-            const lastRate = computeLastCacheRate(ctx);
-            if (lastRate !== null) segs.push(`cache ${(lastRate * 100).toFixed(0)}%`);
-          }
-          const text = segs.join(" \u00B7 ");
-          const plainLeft = `\u2500 ${text} \u2500`;
-          const fillerCount = width - 2 - visibleWidth(plainLeft);
-          const filler = fillerCount > 0 ? theme.fg("dim", "\u2500".repeat(fillerCount)) : "";
-          lines.push(
-            ` ${theme.fg("dim", "\u2500")} ${theme.fg("dim", text)} ${theme.fg("dim", "\u2500")}${filler} `,
-          );
-          lines.push(""); // bottom margin
-        }
-        // model/path/git lives in the footer (below editor, above context line)
-        return lines;
-      },
+      render: (): string[] => [],
       invalidate: () => {},
       dispose: () => {},
     };
   };
 }
 
-function updateWidget(
-  ctx: ExtensionContext,
-  state: AppState,
-  config: StatusLineConfig,
-) {
-  ctx.ui.setWidget("status-header", createWidgetFactory(ctx, state, config), {
+function updateWidget(ctx: ExtensionContext, state: AppState) {
+  ctx.ui.setWidget("status-header", createWidgetFactory(state), {
     placement: "aboveEditor",
   });
 }
@@ -619,7 +568,7 @@ export default function (pi: ExtensionAPI) {
   // ── Widget update helpers ──
 
   const doUpdateWidget = (ctx: ExtensionContext) => {
-    updateWidget(ctx, state, configRef.current);
+    updateWidget(ctx, state);
   };
 
   const debouncedUpdate = (ctx: ExtensionContext) => {
