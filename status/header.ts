@@ -134,46 +134,36 @@ export function computeTokenStats(ctx: ExtensionContext): TokenStats {
 }
 
 /**
- * Compute the cache hit rate for the last assistant request.
- * Returns null when there is no usage data or the denominator is zero.
+ * Compute per-turn token usage + cache hit rate across ALL assistant messages
+ * produced during the turn that began at entry index `startIndex`.
+ *
+ * A single user turn can span multiple provider requests — each tool call
+ * triggers a follow-up request, and retries re-run the turn — each emitting its
+ * own assistant entry with its own usage. Summing input/output/cacheRead /
+ * cacheWrite across all of them yields the turn's true totals; the cache rate is
+ * the aggregate totalCacheRead / (totalCacheRead + totalInput), not just the
+ * final request's.
+ *
+ * Returns null when no assistant usage was recorded in the turn.
  */
-export function computeLastCacheRate(ctx: ExtensionContext): number | null {
-    try {
-        const entries = ctx.sessionManager.getEntries();
-        for (let i = entries.length - 1; i >= 0; i--) {
-            const entry = entries[i];
-            if (
-                entry.type === "message" &&
-                entry.message?.role === "assistant" &&
-                entry.message.usage
-            ) {
-                const u = entry.message.usage;
-                const cr = u.cacheRead || 0;
-                const inp = u.input || 0;
-                const denom = cr + inp;
-                if (denom === 0) return null;
-                return cr / denom;
-            }
-        }
-    } catch {
-        /* session not ready */
-    }
-    return null;
-}
-
-/**
- * Compute the last assistant message's token usage (input/output/cacheRead/cacheWrite).
- * Returns null when there is no usage data.
- */
-export function computeLastUsage(ctx: ExtensionContext): {
+export function computeTurnStats(
+    ctx: ExtensionContext,
+    startIndex: number,
+): {
     input: number;
     output: number;
     cacheRead: number;
     cacheWrite: number;
+    cacheRate: number | null;
 } | null {
+    let input = 0;
+    let output = 0;
+    let cacheRead = 0;
+    let cacheWrite = 0;
+    let found = false;
     try {
         const entries = ctx.sessionManager.getEntries();
-        for (let i = entries.length - 1; i >= 0; i--) {
+        for (let i = Math.max(0, startIndex); i < entries.length; i++) {
             const entry = entries[i];
             if (
                 entry.type === "message" &&
@@ -181,18 +171,20 @@ export function computeLastUsage(ctx: ExtensionContext): {
                 entry.message.usage
             ) {
                 const u = entry.message.usage;
-                return {
-                    input: u.input || 0,
-                    output: u.output || 0,
-                    cacheRead: u.cacheRead || 0,
-                    cacheWrite: u.cacheWrite || 0,
-                };
+                input += u.input || 0;
+                output += u.output || 0;
+                cacheRead += u.cacheRead || 0;
+                cacheWrite += u.cacheWrite || 0;
+                found = true;
             }
         }
     } catch {
         /* session not ready */
     }
-    return null;
+    if (!found) return null;
+    const denom = cacheRead + input;
+    const cacheRate = denom > 0 ? cacheRead / denom : null;
+    return { input, output, cacheRead, cacheWrite, cacheRate };
 }
 
 // ── Status header rendering ──

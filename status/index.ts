@@ -30,8 +30,7 @@ import {
   loadStatusConfig,
   buildStatusHeader,
   computeTokenStats,
-  computeLastCacheRate,
-  computeLastUsage,
+  computeTurnStats,
   formatTokens,
 } from "./header.ts";
 import { registerStatuslineCommand } from "./statusline.ts";
@@ -116,6 +115,10 @@ interface AppState {
   isRetrying: boolean;
   workingMessageTimer: ReturnType<typeof setInterval> | null;
   agentStartMs: number | null;
+  // Entry index captured when the current turn began. Assistant messages from
+  // here onward belong to this turn and are summed for worked-for stats; a
+  // single turn can span multiple requests (tool calls) and retries.
+  turnStartEntryIndex: number;
 
   // Auto-title
   isAutoTitling: boolean;
@@ -153,6 +156,7 @@ function createInitialState(): AppState {
     isRetrying: false,
     workingMessageTimer: null,
     agentStartMs: null,
+    turnStartEntryIndex: 0,
     isAutoTitling: false,
     gitStatus: null,
     lastAgentDurationMs: null,
@@ -266,6 +270,9 @@ function formatDuration(ms: number, prefix: string): string {
 function startWorkingMessage(ctx: ExtensionContext, state: AppState) {
   if (state.workingMessageTimer) return;
   state.agentStartMs = Date.now();
+  // Demarcate this turn: every assistant message from here on belongs to it
+  // (a turn spans one request per tool-call round, plus any retries).
+  state.turnStartEntryIndex = ctx.sessionManager.getEntries().length;
   ctx.ui.setWorkingMessage(formatDuration(0, "Working for"));
   state.workingMessageTimer = setInterval(() => {
     if (state.agentStartMs === null) return;
@@ -282,9 +289,9 @@ function startWorkingMessage(ctx: ExtensionContext, state: AppState) {
     // can leave a working loader alive in states where pi expects it to be
     // cleared. Fired every second (and on every tool_execution_start) this
     // fights pi's indicator state machine and drives a near-continuous
-    // render loop. Because every render recomputes the status header — which
-    // walks all session entries (computeTokenStats x2 + computeLastCacheRate)
-    // — the event loop gets pinned on long sessions
+    // render loop. Because every render recomputes the status header —
+    // which walks all session entries (computeTokenStats) — the event loop
+    // gets pinned on long sessions
     // and the TUI becomes unresponsive ("卡死"). Letting pi own the loader
     // and only updating the text removes the conflict entirely.
     ctx.ui.setWorkingMessage(formatDuration(Date.now() - state.agentStartMs, "Working for"));
@@ -443,18 +450,17 @@ export default function (pi: ExtensionAPI) {
 
   const appendWorkedForEntry = (ctx: ExtensionContext) => {
     if (state.lastAgentDurationMs === null) return;
-    const usage = computeLastUsage(ctx);
-    const cacheRate = computeLastCacheRate(ctx);
+    const stats = computeTurnStats(ctx, state.turnStartEntryIndex);
     pi.appendEntry<WorkedForData>("worked-for", {
       timestamp: state.lastAgentCompletedAt ?? Date.now(),
       durationMs: state.lastAgentDurationMs,
       tps: state.tokenSpeedEngine.tps,
       ttftSec: state.tokenSpeedEngine.ttftSec,
-      input: usage?.input ?? 0,
-      output: usage?.output ?? 0,
-      cacheRead: usage?.cacheRead ?? 0,
-      cacheWrite: usage?.cacheWrite ?? 0,
-      cacheRate,
+      input: stats?.input ?? 0,
+      output: stats?.output ?? 0,
+      cacheRead: stats?.cacheRead ?? 0,
+      cacheWrite: stats?.cacheWrite ?? 0,
+      cacheRate: stats?.cacheRate ?? null,
     });
   };
 
