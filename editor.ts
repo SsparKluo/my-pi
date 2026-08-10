@@ -7,7 +7,7 @@
  * ── Mode-colored border ───────────────────────────────────────────────────
  * The `─` border is recolored by input mode:
  *   `!`  → bashMode      (normal bash block, like history)
- *   `!!` → dim           (excluded-from-context bash block, like history)
+ *   `!!` → dimmed bashMode (excluded-from-context bash block)
  *   plain → dim          (same color as the footer's token-stat text ↑↓R…)
  *
  * ── `$skill` mention highlighting + completion (codex-style) ──────────────
@@ -593,6 +593,24 @@ export function highlightSkillTokens(line: string, index: Map<string, SkillEntry
 // Editor
 // ============================================================================
 
+// `!!` input mode: a dimmer shade of bashMode (same hue family), blended with
+// the `dim` color. Derived from the resolved theme RGBs so it tracks any theme;
+// falls back to plain `dim` when either color isn't truecolor.
+const DIM_BASHMODE_BLEND = 0.6;
+function dimBashModeBorder(theme: Theme): (s: string) => string {
+	const mb = theme.getFgAnsi("bashMode").match(/^\x1b\[38;2;(\d+);(\d+);(\d+)m$/);
+	const md = theme.getFgAnsi("dim").match(/^\x1b\[38;2;(\d+);(\d+);(\d+)m$/);
+	if (mb && md) {
+		const mix = (a: number, b: number) =>
+			Math.round(a * DIM_BASHMODE_BLEND + b * (1 - DIM_BASHMODE_BLEND));
+		const r = mix(+mb[1], +md[1]);
+		const g = mix(+mb[2], +md[2]);
+		const b = mix(+mb[3], +md[3]);
+		return (s: string) => `\x1b[38;2;${r};${g};${b}m${s}\x1b[39m`;
+	}
+	return (s: string) => theme.fg("dim", s);
+}
+
 export class SkillHighlightEditor extends CustomEditor {
 	private piTheme: Theme;
 	private skillIndex: Map<string, SkillEntry>;
@@ -685,11 +703,13 @@ export class SkillHighlightEditor extends CustomEditor {
 		// pi's native rendering; only the border color is swapped, then restored
 		// so pi keeps owning this field.
 		//   `!`  → bashMode   (normal bash block, like history)
-		//   `!!` → dim        (excluded-from-context bash block, like history)
+		//   `!!` → dimmed bashMode (excluded-from-context bash block)
 		//   plain → dim       (same color as the footer's token-stat text ↑↓R…)
 		const piBorder = this.borderColor;
 		const trimmed = this.getText().trimStart();
-		if (trimmed.startsWith("!") && !trimmed.startsWith("!!")) {
+		if (trimmed.startsWith("!!")) {
+			this.borderColor = dimBashModeBorder(this.piTheme);
+		} else if (trimmed.startsWith("!")) {
 			this.borderColor = (s: string) => this.piTheme.fg("bashMode", s);
 		} else {
 			this.borderColor = (s: string) => this.piTheme.fg("dim", s);
