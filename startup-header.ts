@@ -240,7 +240,7 @@ function collectSkillsSub(dir: string): string[] {
     }
     return out;
 }
-function collectSkillsRoot(dir: string): string[] {
+function collectSkillsRoot(dir: string, allowRootMd = true): string[] {
     if (!isDirectory(dir)) return [];
     if (dirHasSkillMd(dir)) return [skillName(join(dir, "SKILL.md"))];
     const out: string[] = [];
@@ -248,8 +248,41 @@ function collectSkillsRoot(dir: string): string[] {
         if (name.startsWith(".") || name === "node_modules") continue;
         const f = join(dir, name);
         if (isDirectory(f)) out.push(...collectSkillsSub(f));
-        else if (name.endsWith(".md")) out.push(skillName(f));
+        else if (allowRootMd && name.endsWith(".md")) out.push(skillName(f));
     }
+    return out;
+}
+
+// .agents/skills discovery: walk cwd up to git repo root (or fs root), mirroring
+// pi core. The user-global ~/.agents/skills is excluded here (scanned as global).
+function findGitRepoRoot(startDir: string): string | null {
+    let dir = resolve(startDir);
+    while (true) {
+        if (isDirectory(join(dir, ".git"))) return dir;
+        const parent = dirname(dir);
+        if (parent === dir) return null;
+        dir = parent;
+    }
+}
+function collectAgentsAncestorSkillDirs(startDir: string): string[] {
+    const userAgentsSkillsDir = join(HOME, ".agents", "skills");
+    const dirs: string[] = [];
+    const gitRoot = findGitRepoRoot(startDir);
+    let dir = resolve(startDir);
+    while (true) {
+        const d = join(dir, ".agents", "skills");
+        if (resolve(d) !== resolve(userAgentsSkillsDir)) dirs.push(d);
+        if (gitRoot && resolve(dir) === resolve(gitRoot)) break;
+        const parent = dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+    }
+    return dirs;
+}
+function dedupSkills(list: string[]): string[] {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const s of list) if (!seen.has(s)) { seen.add(s); out.push(s); }
     return out;
 }
 
@@ -355,12 +388,23 @@ function collectResources(ctx: ExtensionContext): LoadedResources {
         skillsPkg.push(...c.skills);
     }
 
+    const skillsGlobal = dedupSkills([
+        ...collectSkillsRoot(join(AGENT_DIR, "skills")),
+        ...collectSkillsRoot(join(HOME, ".agents", "skills"), false),
+    ]);
+    const skillsLocal = trusted
+        ? dedupSkills([
+            ...collectSkillsRoot(join(cwd, CONFIG_DIR_NAME, "skills")),
+            ...collectAgentsAncestorSkillDirs(cwd).flatMap((d) => collectSkillsRoot(d, false)),
+        ])
+        : [];
+
     return {
         context: collectContextFiles(cwd, trusted),
         extensions,
-        skillsGlobal: collectSkillsRoot(join(AGENT_DIR, "skills")),
+        skillsGlobal,
         skillsPkg,
-        skillsLocal: trusted ? collectSkillsRoot(join(cwd, CONFIG_DIR_NAME, "skills")) : [],
+        skillsLocal,
         prompts,
     };
 }
