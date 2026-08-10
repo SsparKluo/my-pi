@@ -510,9 +510,16 @@ class StartupHeader implements Component {
         for (const p of r.context.slice(0, DETAIL_CAP)) lines.push(item(p));
 
         lines.push(head(`Skills (${r.skillsGlobal.length}·${r.skillsPkg.length}·${r.skillsLocal.length})`));
-        if (r.skillsGlobal.length) lines.push(item(`global: ${r.skillsGlobal.join(" · ")}`));
-        if (r.skillsPkg.length) lines.push(item(`pkg: ${r.skillsPkg.join(" · ")}`));
-        if (r.skillsLocal.length) lines.push(item(`local: ${r.skillsLocal.join(" · ")}`));
+        const skillScopes: [string, string[]][] = [
+            ["global", r.skillsGlobal],
+            ["pkg", r.skillsPkg],
+            ["local", r.skillsLocal],
+        ];
+        for (const [scope, list] of skillScopes) {
+            if (!list.length) continue;
+            lines.push(item(`${scope} (${list.length}):`));
+            for (const s of list.slice(0, DETAIL_CAP)) lines.push(item(`  ${s}`));
+        }
 
         lines.push(head(`Extensions (${r.extensions.length})`));
         for (const e of r.extensions.slice(0, DETAIL_CAP)) lines.push(item(e));
