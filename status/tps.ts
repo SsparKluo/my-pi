@@ -1,112 +1,130 @@
 /**
- * Token Speed Engine — end-to-end TPS + TTFT
+ * Token Speed Engine — end-to-end TPS + TTFT, accumulated across a whole turn.
  *
- * Two metrics, both computed once per assistant turn:
- *   1. TPS — provider-reported output tokens / full turn wall time
- *            (HTTP request sent → message_end). Reported only after finish().
- *   2. TTFT — wall-clock from HTTP request to first text/thinking delta.
+ * A single agent turn can span several provider requests (one per tool-call
+ * round). Two metrics, both computed over the entire turn:
+ *   1. TPS — total provider-reported output tokens across all requests in the
+ *            turn / sum of each request's wall time (HTTP request → message_end).
+ *            Tool-execution gaps between requests are excluded, so TPS reflects
+ *            real prefill+generation throughput, not idle tool time. Reported
+ *            only after the turn settles.
+ *   2. TTFT — wall-clock from the turn's FIRST HTTP request to its first
+ *             text/thinking delta (always the first request's first token).
  *
- * TPS is end-to-end: it includes prefill/TTFT, so it reflects the throughput
- * the user actually experiences for the whole turn. The provider's real token
- * count is used (no char-based estimation), so it is accurate, not a live guess.
+ * Reset once per agent run (agent_start), including retries — each attempt is
+ * an independent streaming window. Token counts come from the provider's usage
+ * block (no char-based estimation).
  */
 
 export class TokenSpeedEngine {
   private _isStreaming = false;
   private _finished = false;
 
-  // Turn timing — full wall window for end-to-end TPS
-  private _turnStartTime = 0;   // HTTP request sent (before_provider_request)
-  private _turnEndTime = 0;     // message_end
+  // Turn-level accumulators
+  private _firstRequestStartMs = 0; // first before_provider_request of the turn (TTFT anchor)
+  private _currentRequestStartMs = 0; // current request's before_provider_request (per-request window)
+  private _accumulatedRequestMs = 0; // sum of per-request (http→message_end) durations
+  private _accumulatedOutputTokens = 0;
 
   // TTFT
   private _firstTokenArrived = false;
   private _ttftMs = 0;
 
-  // Real token count (from message_end usage)
-  private _realOutputTokens = 0;
-
   get isStreaming() { return this._isStreaming; }
 
   /**
-   * End-to-end tokens per second.
+   * End-to-end tokens per second for the whole turn.
    *
-   * Zero until finish(): a single accurate number is reported per turn using
-   * the provider's real output token count over the full request→end window.
+   * Zero until the turn settles: total output tokens across all requests over
+   * the sum of their prefill+generation windows (tool time excluded).
    */
   get tps(): number {
-    if (!this._finished || this._realOutputTokens === 0 || this._turnStartTime === 0) return 0;
-    const elapsedSec = (this._turnEndTime - this._turnStartTime) / 1000;
-    return elapsedSec > 0 ? this._realOutputTokens / elapsedSec : 0;
+    if (!this._finished || this._accumulatedOutputTokens === 0 || this._accumulatedRequestMs === 0) return 0;
+    return this._accumulatedOutputTokens / (this._accumulatedRequestMs / 1000);
   }
 
   /**
    * TTFT in seconds.
    *
-   * Before first token arrives: returns a live (Date.now() - turnStart) value
-   * so the status header shows a counting-up timer while the user waits.
+   * Before first token arrives: returns a live (Date.now() - firstRequestStart)
+   * value so the status header shows a counting-up timer while the user waits.
    *
-   * After first token: returns the frozen measured TTFT.
+   * After first token: returns the frozen measured TTFT (of the first request).
    */
   get ttftSec(): number {
     if (this._firstTokenArrived) return this._ttftMs / 1000;
-    if (this._isStreaming && this._turnStartTime > 0) {
-      return (Date.now() - this._turnStartTime) / 1000;
+    const anchor = this._firstRequestStartMs || this._currentRequestStartMs;
+    if (this._isStreaming && anchor > 0) {
+      return (Date.now() - anchor) / 1000;
     }
     return this._ttftMs / 1000;
   }
 
   /**
-   * Call on before_provider_request.
-   * Marks the start of the turn's wall window.
+   * Full per-turn reset. Call on agent_start — every agent run (including
+   * retries) starts a fresh independent streaming window.
    */
-  recordHttpRequest() {
-    this._turnStartTime = Date.now();
+  reset() {
+    this._isStreaming = false;
+    this._finished = false;
+    this._firstRequestStartMs = 0;
+    this._currentRequestStartMs = 0;
+    this._accumulatedRequestMs = 0;
+    this._accumulatedOutputTokens = 0;
+    this._firstTokenArrived = false;
+    this._ttftMs = 0;
   }
 
   /**
-   * Call on message_start (assistant).
-   * Resets per-turn state; adopts the captured request time as turn start.
+   * Call on before_provider_request. Marks the current request's start and
+   * seeds the turn's first-request anchor on the initial request.
+   */
+  recordHttpRequest() {
+    const now = Date.now();
+    this._currentRequestStartMs = now;
+    if (this._firstRequestStartMs === 0) this._firstRequestStartMs = now;
+  }
+
+  /**
+   * Call on message_start (assistant). Marks streaming active. Seeds the
+   * anchors as a fallback if before_provider_request was missed.
    */
   start() {
     this._isStreaming = true;
-    this._finished = false;
-    this._realOutputTokens = 0;
-    this._firstTokenArrived = false;
-    this._ttftMs = 0;
-    this._turnEndTime = 0;
-    if (this._turnStartTime === 0) this._turnStartTime = Date.now();
+    const now = Date.now();
+    if (this._currentRequestStartMs === 0) this._currentRequestStartMs = now;
+    if (this._firstRequestStartMs === 0) this._firstRequestStartMs = now;
   }
 
   /**
    * Call on each text_delta / thinking_delta.
-   * Only the first arrival matters: it freezes TTFT. Later calls are no-ops.
+   * Only the first arrival of the turn matters: it freezes TTFT.
    */
   recordToken(_delta: string) {
     if (!this._isStreaming || this._firstTokenArrived) return;
     this._firstTokenArrived = true;
-    this._ttftMs = Date.now() - this._turnStartTime;
+    const anchor = this._firstRequestStartMs || this._currentRequestStartMs;
+    this._ttftMs = anchor > 0 ? Date.now() - anchor : 0;
   }
 
   /**
-   * Call on message_end (assistant).
-   * Freezes the turn window and injects the provider-reported output token
-   * count so the final status render shows accurate end-to-end TPS.
+   * Call on message_end (assistant). Accumulates this request's duration and
+   * the provider-reported output token count into the turn totals.
    */
   finish(realOutputTokens?: number) {
     this._isStreaming = false;
     this._finished = true;
-    this._turnEndTime = Date.now();
+    if (this._currentRequestStartMs > 0) {
+      this._accumulatedRequestMs += Date.now() - this._currentRequestStartMs;
+      this._currentRequestStartMs = 0;
+    }
     if (realOutputTokens !== undefined && realOutputTokens > 0) {
-      this._realOutputTokens = realOutputTokens;
+      this._accumulatedOutputTokens += realOutputTokens;
     }
   }
 
-  /** Full reset (e.g. on session_shutdown). */
+  /** Full reset (session_shutdown). */
   stop() {
-    this._isStreaming = false;
-    this._finished = false;
-    this._turnStartTime = 0;
-    this._turnEndTime = 0;
+    this.reset();
   }
 }

@@ -649,6 +649,9 @@ export default function (pi: ExtensionAPI) {
     const isRetryRecovery = state.isRetrying;
     state.isRetrying = false; // consume the retry flag
     state.isWorking = true;
+    // Each agent run (fresh turn or retry) is an independent streaming
+    // window — reset TPS/TTFT accumulators so they reflect only this attempt.
+    state.tokenSpeedEngine.reset();
     state.lastAgentDurationMs = null;
     state.lastAgentCompletedAt = null;
     startTitleAnimation(pi, ctx, state);
