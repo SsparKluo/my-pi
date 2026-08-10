@@ -6,9 +6,10 @@
  *   - Real-time "Working for" message
  *   - Turn duration display
  *   - Auto conversation title generation
- *   - Status header widget replacing footer (header.ts)
+ *   - Footer: model/path/git above context+token stats (header.ts)
+ *   - aboveEditor widget: latest worked-for summary
  *
- * Hides the built-in footer to avoid duplication.
+ * Replaces the built-in footer to avoid duplication.
  */
 
 import fs from "node:fs";
@@ -16,6 +17,7 @@ import path from "node:path";
 import { complete } from "@earendil-works/pi-ai/compat";
 import { Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type {
+  CustomEntry,
   ExtensionAPI,
   ExtensionContext,
   ReadonlyFooterDataProvider,
@@ -65,6 +67,8 @@ function formatDurationOnly(ms: number): string {
 }
 
 // ── Entry renderer ──
+// Durable session entry (pi.appendEntry + registerEntryRenderer):
+// not sent to the LLM, persisted in the session, re-rendered on /resume.
 
 interface WorkedForData {
   timestamp: number;
@@ -79,20 +83,23 @@ interface WorkedForData {
 }
 
 function renderWorkedForEntry(
-  entry: { data?: WorkedForData },
+  entry: CustomEntry<WorkedForData>,
   _opts: { expanded: boolean },
   theme: Theme,
+  config: StatusLineConfig,
 ) {
   const d = entry.data;
   if (!d) return new Text(theme.fg("dim", "worked-for"), 0, 0);
   const segs: string[] = [formatTimestamp(d.timestamp), formatDurationOnly(d.durationMs)];
-  if (d.tps > 0) segs.push(`${d.tps.toFixed(0)} t/s`);
-  if (d.ttftSec > 0) segs.push(`TTFT ${d.ttftSec.toFixed(1)}s`);
-  if (d.input) segs.push(`\u2191${formatTokens(d.input)}`);
-  if (d.output) segs.push(`\u2193${formatTokens(d.output)}`);
-  if (d.cacheRead) segs.push(`R${formatTokens(d.cacheRead)}`);
-  if (d.cacheWrite) segs.push(`W${formatTokens(d.cacheWrite)}`);
-  if (d.cacheRate !== null) segs.push(`cache ${(d.cacheRate * 100).toFixed(0)}%`);
+  if (config.tokenSpeed && d.tps > 0) segs.push(`${d.tps.toFixed(0)} t/s`);
+  if (config.ttft && d.ttftSec > 0) segs.push(`TTFT ${d.ttftSec.toFixed(1)}s`);
+  if (config.tokenUsage) {
+    if (d.input) segs.push(`\u2191${formatTokens(d.input)}`);
+    if (d.output) segs.push(`\u2193${formatTokens(d.output)}`);
+    if (d.cacheRead) segs.push(`R${formatTokens(d.cacheRead)}`);
+    if (d.cacheWrite) segs.push(`W${formatTokens(d.cacheWrite)}`);
+  }
+  if (config.cacheRate && d.cacheRate !== null) segs.push(`cache ${(d.cacheRate * 100).toFixed(0)}%`);
   return new Text(theme.fg("dim", segs.join(" \u00B7 ")), 0, 0);
 }
 
@@ -115,7 +122,6 @@ interface AppState {
 
   // Status header
   gitStatus: GitStatus | null;
-  lastAgentDuration: string | null;
   lastAgentDurationMs: number | null;
   lastAgentCompletedAt: number | null;
   gitRefreshTimer: ReturnType<typeof setTimeout> | null;
@@ -149,7 +155,6 @@ function createInitialState(): AppState {
     agentStartMs: null,
     isAutoTitling: false,
     gitStatus: null,
-    lastAgentDuration: null,
     lastAgentDurationMs: null,
     lastAgentCompletedAt: null,
     gitRefreshTimer: null,
@@ -165,7 +170,7 @@ function createInitialState(): AppState {
   };
 }
 
-// ── Footer: context/usage line (below the editor) ──
+// ── Footer: model/path/git + context/usage (below the editor) ──
 //
 // One line combining Magic Context usage + state (published via
 // ctx.ui.setStatus, read back through footerData.getExtensionStatuses()),
@@ -177,14 +182,29 @@ function createInitialState(): AppState {
 const MAGIC_CONTEXT_STATUS_KEY = "magic-context";
 
 function createFooterFactory(
+  pi: ExtensionAPI,
   ctx: ExtensionContext,
+  state: AppState,
   configRef: { current: StatusLineConfig },
 ) {
   return (_tui: TUI, theme: Theme, footerData: ReadonlyFooterDataProvider) => ({
     render: (width: number): string[] => {
       const config = configRef.current;
-      const parts: string[] = [];
+      const lines: string[] = [];
 
+      // 1. Model / path / git — below the editor, above the context line
+      for (const l of buildStatusHeader(
+        pi,
+        ctx,
+        { gitStatus: state.gitStatus },
+        config,
+        theme,
+      )) {
+        lines.push(truncateToWidth(l, width, theme.fg("dim", "...")));
+      }
+
+      // 2. Context line: magic-context status + cumulative token stats
+      const parts: string[] = [];
       const raw = footerData
         .getExtensionStatuses()
         .get(MAGIC_CONTEXT_STATUS_KEY);
@@ -213,10 +233,13 @@ function createFooterFactory(
         parts.push(`Cache ${cum.toFixed(0)}%`);
       }
 
-      if (parts.length === 0) return [];
-      const sep = theme.fg("borderMuted", " │ ");
-      const line = parts.map((p) => theme.fg("muted", p)).join(sep);
-      return [truncateToWidth(line, width)];
+      if (parts.length > 0) {
+        const sep = theme.fg("borderMuted", " │ ");
+        const line = parts.map((p) => theme.fg("muted", p)).join(sep);
+        lines.push(truncateToWidth(line, width));
+      }
+
+      return lines;
     },
     invalidate: () => {},
   });
@@ -229,11 +252,7 @@ function createFooterFactory(
 const GIT_SELF_EVENT_GRACE_MS = 1_000;
 
 function formatDuration(ms: number, prefix: string): string {
-  const total = Math.round(ms / 1000);
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  return `${prefix} ${[h > 0 && `${h}h`, m > 0 && `${m}m`, `${s}s`].filter(Boolean).join(" ")}`;
+  return `${prefix} ${formatDurationOnly(ms)}`;
 }
 
 // ── Working message timer ──
@@ -308,8 +327,7 @@ function finishWorking(ctx: ExtensionContext, state: AppState) {
   state.agentStartMs = null;
 
   if (elapsedMs !== null) {
-    state.lastAgentDuration = formatDuration(Date.now() - state.agentStartMs!, "Working for");
-    state.lastAgentDurationMs = Date.now() - state.agentStartMs!;
+    state.lastAgentDurationMs = elapsedMs;
     state.lastAgentCompletedAt = Date.now();
   } else {
     ctx.ui.setWorkingMessage();
@@ -389,7 +407,6 @@ async function autoGenerateTitle(pi: ExtensionAPI, ctx: ExtensionContext, state:
 // ── Widget management ──
 
 function createWidgetFactory(
-  pi: ExtensionAPI,
   ctx: ExtensionContext,
   state: AppState,
   config: StatusLineConfig,
@@ -402,12 +419,47 @@ function createWidgetFactory(
         // Don't cache by width — state (gitStatus, tokenSpeed, etc.) changes
         // asynchronously and must always re-compute on re-render.
         const lines: string[] = [];
-        const statusLines = buildStatusHeader(pi, ctx, {
-          gitStatus: state.gitStatus,
-        }, config, theme);
-        for (const l of statusLines) {
-          lines.push(truncateToWidth(l, width, theme.fg("dim", "...")));
+        // Latest turn summary — fixed chrome above the editor. The same data is
+        // also written as a durable context entry (appendEntry) for scrollback.
+        if (state.lastAgentDurationMs !== null) {
+          const ts = state.lastAgentCompletedAt
+            ? formatTimestamp(state.lastAgentCompletedAt)
+            : null;
+          const segs = [
+            ts,
+            formatDurationOnly(state.lastAgentDurationMs),
+          ].filter((s): s is string => s !== null);
+          if (config.tokenSpeed && state.tokenSpeedEngine.tps > 0) {
+            segs.push(`${state.tokenSpeedEngine.tps.toFixed(0)} t/s`);
+          }
+          if (config.ttft && state.tokenSpeedEngine.ttftSec > 0) {
+            segs.push(`TTFT ${state.tokenSpeedEngine.ttftSec.toFixed(1)}s`);
+          }
+          if (config.tokenUsage) {
+            const lastUsage = computeLastUsage(ctx);
+            if (lastUsage) {
+              const tokSegs: string[] = [];
+              if (lastUsage.input) tokSegs.push(`\u2191${formatTokens(lastUsage.input)}`);
+              if (lastUsage.output) tokSegs.push(`\u2193${formatTokens(lastUsage.output)}`);
+              if (lastUsage.cacheRead) tokSegs.push(`R${formatTokens(lastUsage.cacheRead)}`);
+              if (lastUsage.cacheWrite) tokSegs.push(`W${formatTokens(lastUsage.cacheWrite)}`);
+              if (tokSegs.length > 0) segs.push(tokSegs.join(" "));
+            }
+          }
+          if (config.cacheRate) {
+            const lastRate = computeLastCacheRate(ctx);
+            if (lastRate !== null) segs.push(`cache ${(lastRate * 100).toFixed(0)}%`);
+          }
+          const text = segs.join(" \u00B7 ");
+          const plainLeft = `\u2500 ${text} \u2500`;
+          const fillerCount = width - 2 - visibleWidth(plainLeft);
+          const filler = fillerCount > 0 ? theme.fg("dim", "\u2500".repeat(fillerCount)) : "";
+          lines.push(
+            ` ${theme.fg("dim", "\u2500")} ${theme.fg("dim", text)} ${theme.fg("dim", "\u2500")}${filler} `,
+          );
+          lines.push(""); // bottom margin
         }
+        // model/path/git lives in the footer (below editor, above context line)
         return lines;
       },
       invalidate: () => {},
@@ -417,12 +469,11 @@ function createWidgetFactory(
 }
 
 function updateWidget(
-  pi: ExtensionAPI,
   ctx: ExtensionContext,
   state: AppState,
   config: StatusLineConfig,
 ) {
-  ctx.ui.setWidget("status-header", createWidgetFactory(pi, ctx, state, config), {
+  ctx.ui.setWidget("status-header", createWidgetFactory(ctx, state, config), {
     placement: "aboveEditor",
   });
 }
@@ -435,7 +486,11 @@ export default function (pi: ExtensionAPI) {
 
   // Durable session entry: per-turn worked-for summary, rendered in the
   // conversation stream (not sent to LLM, not fixed to any widget).
-  pi.registerEntryRenderer<WorkedForData>("worked-for", renderWorkedForEntry);
+  // Display toggles are read from config at render time so /statusline changes
+  // apply to historical entries too.
+  pi.registerEntryRenderer<WorkedForData>("worked-for", (entry, opts, theme) =>
+    renderWorkedForEntry(entry, opts, theme, configRef.current),
+  );
 
   const appendWorkedForEntry = (ctx: ExtensionContext) => {
     if (state.lastAgentDurationMs === null) return;
@@ -564,7 +619,7 @@ export default function (pi: ExtensionAPI) {
   // ── Widget update helpers ──
 
   const doUpdateWidget = (ctx: ExtensionContext) => {
-    updateWidget(pi, ctx, state, configRef.current);
+    updateWidget(ctx, state, configRef.current);
   };
 
   const debouncedUpdate = (ctx: ExtensionContext) => {
@@ -590,13 +645,13 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     if (!ctx.hasUI) return;
 
-    // Footer: context/usage line below the editor
-    ctx.ui.setFooter(createFooterFactory(ctx, configRef));
+    // Footer: model/path/git above context/token stats (below the editor)
+    ctx.ui.setFooter(createFooterFactory(pi, ctx, state, configRef));
 
     state.isAutoTitling = false;
     state.isRetrying = false;
 
-    state.lastAgentDuration = null;
+    state.lastAgentDurationMs = null;
     state.lastAgentCompletedAt = null;
 
     // Use pi's built-in working indicator (accent-colored braille spinner) so
@@ -639,7 +694,7 @@ export default function (pi: ExtensionAPI) {
     const isRetryRecovery = state.isRetrying;
     state.isRetrying = false; // consume the retry flag
     state.isWorking = true;
-    state.lastAgentDuration = null;
+    state.lastAgentDurationMs = null;
     state.lastAgentCompletedAt = null;
     startTitleAnimation(pi, ctx, state);
     // Only reset the timer on fresh starts; retry/continuation attempts keep

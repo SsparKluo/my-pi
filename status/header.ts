@@ -1,17 +1,16 @@
 /**
  * Status Header Widget Module
  *
- * Renders a compact identity line above the editor with:
- * - Model + thinking level
- * - Current working directory + git branch
+ * Renders a compact identity line (provider/model + thinking, cwd, git).
+ * Shown in the footer below the editor, above the context/token line.
  *
- * Token stats, cache rate, and TPS live elsewhere (footer / "Worked for"
- * line) — see status/index.ts. Also provides the /statusline helpers.
+ * Token stats, cache rate, and TPS live elsewhere (footer context line /
+ * worked-for) — see status/index.ts. Also provides the /statusline helpers.
  */
 
 import path from "node:path";
 import fs from "node:fs";
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { truncateToWidth } from "@earendil-works/pi-tui";
 import type {
     ExtensionAPI,
     ExtensionContext,
@@ -203,7 +202,7 @@ export interface HeaderRenderData {
 }
 
 /**
- * Build the status header lines (single line) for the aboveEditor widget.
+ * Build the status header lines (single line) for the footer.
  * Uses the same token stats computation as pi's built-in footer.
  */
 export function buildStatusHeader(
