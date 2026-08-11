@@ -8,120 +8,14 @@ import {
 	type BuildSystemPromptOptions,
 	type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import {
 	appendSection,
 	buildManagedSystemPrompt,
 	replaceAvailableToolsInPrompt,
 	replacePiPromptPrefix,
-	type ToolPromptSpec,
 } from "./system-prompt-core.ts";
+import { type EffectiveConfig, loadConfig } from "./system-prompt-config.ts";
 import { detectEnvironment } from "./system-prompt-env.ts";
-
-const CONFIG_FILE_NAME = "system-prompt.json";
-
-export interface SystemPromptConfig {
-	basePrompt?: string;
-	general?: string[];
-	tools?: Record<string, ToolPromptSpec>;
-}
-
-interface ConfigReadResult {
-	config?: SystemPromptConfig;
-	error?: string;
-	absent?: boolean;
-}
-
-interface EffectiveConfig {
-	basePrompt?: string;
-	general: string[];
-	tools: Record<string, ToolPromptSpec>;
-	errors: string[];
-	absent: boolean;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function readConfig(path: string): ConfigReadResult {
-	if (!existsSync(path)) return {};
-
-	try {
-		const value: unknown = JSON.parse(readFileSync(path, "utf8"));
-		if (!isRecord(value)) {
-			return { error: `${path}: expected a JSON object` };
-		}
-
-		const basePrompt = value.basePrompt;
-		if (basePrompt !== undefined && typeof basePrompt !== "string") {
-			return { error: `${path}: basePrompt must be a string` };
-		}
-
-		const general = value.general;
-		if (general !== undefined && (!Array.isArray(general) || general.some((item) => typeof item !== "string"))) {
-			return { error: `${path}: general must be an array of strings` };
-		}
-
-		const tools = value.tools;
-		if (tools !== undefined && !isRecord(tools)) {
-			return { error: `${path}: tools must be an object` };
-		}
-
-		const parsedTools: Record<string, ToolPromptSpec> = {};
-		if (isRecord(tools)) {
-			for (const [name, rawTool] of Object.entries(tools)) {
-				if (!isRecord(rawTool) || typeof rawTool.snippet !== "string" || !rawTool.snippet.trim()) {
-					return { error: `${path}: tools.${name}.snippet must be a non-empty string` };
-				}
-				if (
-					!Array.isArray(rawTool.guidelines) ||
-					rawTool.guidelines.some((item) => typeof item !== "string")
-				) {
-					return { error: `${path}: tools.${name}.guidelines must be an array of strings` };
-				}
-				parsedTools[name] = {
-					snippet: rawTool.snippet.trim(),
-					guidelines: rawTool.guidelines.map((item) => item.trim()).filter(Boolean),
-				};
-			}
-		}
-
-		return {
-			config: {
-				basePrompt: typeof basePrompt === "string" && basePrompt.trim() ? basePrompt : undefined,
-				general: Array.isArray(general) ? general.map((item) => item.trim()).filter(Boolean) : undefined,
-				tools: parsedTools,
-			},
-			absent: false,
-		};
-	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		return { error: `${path}: ${message}`, absent: false };
-	}
-}
-
-function loadConfig(cwd: string, trusted: boolean): EffectiveConfig {
-	const globalPath = join(getAgentDir(), CONFIG_FILE_NAME);
-	const globalResult = readConfig(globalPath);
-	const projectPath = join(cwd, CONFIG_DIR_NAME, CONFIG_FILE_NAME);
-	const projectResult = trusted ? readConfig(projectPath) : { absent: true };
-
-	return {
-		basePrompt: projectResult.config?.basePrompt ?? globalResult.config?.basePrompt,
-		general: [
-			...(globalResult.config?.general ?? []),
-			...(projectResult.config?.general ?? []),
-		],
-		tools: {
-			...(globalResult.config?.tools ?? {}),
-			...(projectResult.config?.tools ?? {}),
-		},
-		errors: [globalResult.error, projectResult.error].filter((error): error is string => Boolean(error)),
-		absent: (globalResult.absent ?? false) && (projectResult.absent ?? false),
-	};
-}
 
 export function buildPiSystemPrompt(options: BuildSystemPromptOptions): string {
 	const {
@@ -205,10 +99,20 @@ export function buildPiSystemPrompt(options: BuildSystemPromptOptions): string {
 }
 
 const warnedConfigErrors = new Set<string>();
+const warnedPrefixDrift = { current: false };
 
 export default function systemPromptExtension(pi: ExtensionAPI) {
 	pi.on("before_agent_start", async (event, ctx) => {
-		const config = loadConfig(ctx.cwd, ctx.isProjectTrusted());
+		const config = loadConfig({
+			cwd: ctx.cwd,
+			trusted: ctx.isProjectTrusted(),
+			agentDir: getAgentDir(),
+			configDirName: CONFIG_DIR_NAME,
+		});
+
+		// No config at all: leave Pi's prompt completely untouched.
+		if (config.absent) return undefined;
+
 		for (const error of config.errors) {
 			if (!warnedConfigErrors.has(error)) {
 				warnedConfigErrors.add(error);
@@ -242,8 +146,17 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 		const prompt = replacePiPromptPrefix(event.systemPrompt, piPrompt, managedPrompt);
 		if (prompt !== undefined) return { systemPrompt: prompt };
 
-		// A replacement-style extension has no composable boundary. Keep it intact
-		// and append the configured prompt so its instructions are not discarded.
+		// Drift: our reconstructed Pi prompt no longer matches the real upstream
+		// output (Pi upgraded its prompt format). We can't cleanly isolate Pi's
+		// prefix, so keep the incoming prompt intact and append ours. Warn once so
+		// the operator knows to refresh the buildPiSystemPrompt copy.
+		if (!warnedPrefixDrift.current) {
+			warnedPrefixDrift.current = true;
+			ctx.ui.notify(
+				"system-prompt extension: Pi base prompt format changed upstream; falling back to append mode. Update the buildPiSystemPrompt copy.",
+				"warning",
+			);
+		}
 		return {
 			systemPrompt: appendSection(
 				event.systemPrompt,
