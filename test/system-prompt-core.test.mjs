@@ -12,9 +12,9 @@ import {
 } from "../system-prompt-core.ts";
 
 test("builds per-tool snippets and nested guidelines inside <tool_use>", () => {
-	const prompt = buildManagedSystemPrompt(
-		"base",
-		{
+	const prompt = buildManagedSystemPrompt({
+		basePrompt: "base",
+		options: {
 			cwd: "C:\\work\\project",
 			appendSystemPrompt: "append",
 			promptGuidelines: ["native guideline"],
@@ -23,17 +23,17 @@ test("builds per-tool snippets and nested guidelines inside <tool_use>", () => {
 			contextFiles: [{ path: "C:/work/AGENTS.md", content: "agent rules" }],
 			skills: [{ name: "demo" }],
 		},
-		{
+		configuredTools: {
 			read: {
 				snippet: "Read file contents.",
 				guidelines: ["Read before editing.", "Read before editing."],
 			},
 		},
-		["be concise"],
-		{ cwd: "/work/project", worktree: "/work", isGitRepo: true, platform: "linux" },
-		"/work/.pi/agent",
-		() => "<skill>\n  <name>demo</name>\n</skill>",
-	);
+		generalGuidelines: ["be concise"],
+		environment: { cwd: "/work/project", worktree: "/work", isGitRepo: true, platform: "linux" },
+		agentDir: "/work/.pi/agent",
+		formatSkills: () => "<skill>\n  <name>demo</name>\n</skill>",
+	});
 
 	assert.match(prompt, /<tool_use>\n- read: Read file contents\.\n  - Read before editing\.\n- bash: native bash snippet\n\nIn addition to the tools above, you may have access to other custom tools depending on the project\.\n<\/tool_use>/);
 	assert.match(prompt, /<general_guidelines>\n- be concise\n<\/general_guidelines>/);
@@ -47,15 +47,15 @@ test("builds per-tool snippets and nested guidelines inside <tool_use>", () => {
 });
 
 test("does not format skills when read is unavailable", () => {
-	const prompt = buildManagedSystemPrompt(
-		"base",
-		{ cwd: "/tmp/project", selectedTools: ["bash"], skills: [{ name: "demo" }] },
-		{},
-		[],
-		{ cwd: "/tmp/project", worktree: "/tmp/project", isGitRepo: false, platform: "linux" },
-		"/tmp/.pi/agent",
-		() => "<available_skills>",
-	);
+	const prompt = buildManagedSystemPrompt({
+		basePrompt: "base",
+		options: { cwd: "/tmp/project", selectedTools: ["bash"], skills: [{ name: "demo" }] },
+		configuredTools: {},
+		generalGuidelines: [],
+		environment: { cwd: "/tmp/project", worktree: "/tmp/project", isGitRepo: false, platform: "linux" },
+		agentDir: "/tmp/.pi/agent",
+		formatSkills: () => "<available_skills>",
+	});
 
 	assert.doesNotMatch(prompt, /available_skills/);
 });

@@ -133,15 +133,15 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 			};
 		}
 
-		const managedPrompt = buildManagedSystemPrompt(
-			config.basePrompt,
-			event.systemPromptOptions,
-			config.tools,
-			config.general,
-			detectEnvironment(ctx.cwd),
-			getAgentDir(),
-			(skills) => formatSkillsForPrompt(skills as NonNullable<BuildSystemPromptOptions["skills"]>),
-		);
+		const managedPrompt = buildManagedSystemPrompt({
+			basePrompt: config.basePrompt,
+			options: event.systemPromptOptions,
+			configuredTools: config.tools,
+			generalGuidelines: config.general,
+			environment: detectEnvironment(ctx.cwd),
+			agentDir: getAgentDir(),
+			formatSkills: formatSkillsForPrompt,
+		});
 		const piPrompt = buildPiSystemPrompt(event.systemPromptOptions);
 		const prompt = replacePiPromptPrefix(event.systemPrompt, piPrompt, managedPrompt);
 		if (prompt !== undefined) return { systemPrompt: prompt };

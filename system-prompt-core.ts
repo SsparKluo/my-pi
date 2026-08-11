@@ -15,17 +15,28 @@ export interface ToolPromptSpec {
 	guidelines: readonly string[];
 }
 
-export interface ManagedSystemPromptOptions {
+export interface ManagedSystemPromptOptions<S = unknown> {
 	cwd: string;
 	appendSystemPrompt?: string;
 	contextFiles?: readonly PromptContextFile[];
 	promptGuidelines?: readonly string[];
 	selectedTools?: readonly string[];
 	toolSnippets?: Readonly<Record<string, string>>;
-	skills?: readonly unknown[];
+	skills?: S[];
 }
 
-export type SkillPromptFormatter = (skills: readonly unknown[]) => string;
+export type SkillPromptFormatter<S = unknown> = (skills: S[]) => string;
+
+export interface BuildManagedPromptOptions<S = unknown> {
+	basePrompt: string;
+	/** The prompt options we are rebuilding from (Pi's systemPromptOptions). */
+	options: ManagedSystemPromptOptions<S>;
+	configuredTools: Readonly<Record<string, ToolPromptSpec>>;
+	generalGuidelines: readonly string[];
+	environment: EnvironmentInfo;
+	agentDir: string;
+	formatSkills: SkillPromptFormatter<S>;
+}
 
 export function uniqueGuidelines(guidelines: readonly string[]): string[] {
 	const seen = new Set<string>();
@@ -122,15 +133,8 @@ export function formatGeneralGuidelines(generalGuidelines: readonly string[]): s
 	return ["<general_guidelines>", ...guidelines.map((guideline) => `- ${guideline}`), "</general_guidelines>"].join("\n");
 }
 
-export function buildManagedSystemPrompt(
-	basePrompt: string,
-	options: ManagedSystemPromptOptions,
-	configuredTools: Readonly<Record<string, ToolPromptSpec>>,
-	generalGuidelines: readonly string[],
-	environment: EnvironmentInfo,
-	agentDir: string,
-	formatSkills: SkillPromptFormatter,
-): string {
+export function buildManagedSystemPrompt<S = unknown>(opts: BuildManagedPromptOptions<S>): string {
+	const { basePrompt, options, configuredTools, generalGuidelines, environment, agentDir, formatSkills } = opts;
 	let prompt = basePrompt;
 
 	prompt = appendSection(prompt, formatGeneralGuidelines(generalGuidelines));
@@ -231,8 +235,9 @@ export function replaceAvailableToolsInPrompt(
 }
 
 function stripPiDefaultGuidelines(prompt: string): string {
-	const start = prompt.indexOf("\n\nGuidelines:\n");
+	const header = "\n\nGuidelines:\n";
+	const start = prompt.indexOf(header);
 	if (start === -1) return prompt;
-	const afterGuidelines = prompt.indexOf("\n\n", start + 14);
+	const afterGuidelines = prompt.indexOf("\n\n", start + header.length);
 	return afterGuidelines === -1 ? prompt.slice(0, start) : `${prompt.slice(0, start)}${prompt.slice(afterGuidelines)}`;
 }
