@@ -14,11 +14,12 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { complete } from "@earendil-works/pi-ai/compat";
+import { complete, type Api, type Model } from "@earendil-works/pi-ai/compat";
 import { Text, truncateToWidth } from "@earendil-works/pi-tui";
 import type {
   CustomEntry,
   ExtensionAPI,
+  ExtensionCommandContext,
   ExtensionContext,
   ReadonlyFooterDataProvider,
   SessionEntry,
@@ -357,17 +358,39 @@ function extractTextParts(content: unknown): string[] {
 }
 
 function buildTitlePrompt(entries: SessionEntry[]): string {
+  for (const entry of entries) {
+    if (entry.type !== "message") continue;
+    const msg = entry.message;
+    if (!msg || msg.role !== "user") continue;
+    const text = extractTextParts(msg.content).join("\n").trim();
+    if (!text) continue;
+    const truncated = text.length > 500 ? text.slice(0, 500) + "\u2026" : text;
+    return [
+      "Generate a very short, concise title (\u22645 words, no quotes) for this conversation based on the user's request:",
+      "",
+      truncated,
+      "",
+      "Title:",
+    ].join("\n");
+  }
+  return "";
+}
+
+// Budgets for the full-conversation (manual regenerate) prompt.
+const TITLE_MAX_MSG_CHARS = 300;
+const TITLE_MAX_TURNS = 20;
+
+function buildFullConversationPrompt(entries: SessionEntry[]): string {
   const lines: string[] = [];
   for (const entry of entries) {
     if (entry.type !== "message" || !entry.message?.role) continue;
     const role = entry.message.role;
     if (role !== "user" && role !== "assistant") continue;
-    const textParts = extractTextParts(entry.message.content);
-    const text = textParts.join("\n").trim();
+    const text = extractTextParts(entry.message.content).join("\n").trim();
     if (!text) continue;
-    const truncated = text.length > 500 ? text.slice(0, 500) + "\u2026" : text;
+    const truncated = text.length > TITLE_MAX_MSG_CHARS ? text.slice(0, TITLE_MAX_MSG_CHARS) + "\u2026" : text;
     lines.push(`${role === "user" ? "User" : "Assistant"}: ${truncated}`);
-    if (lines.length > 40) break;
+    if (lines.length >= TITLE_MAX_TURNS) break;
   }
   if (lines.length === 0) return "";
   return [
@@ -381,19 +404,80 @@ function buildTitlePrompt(entries: SessionEntry[]): string {
   ].join("\n");
 }
 
-async function autoGenerateTitle(pi: ExtensionAPI, ctx: ExtensionContext, state: AppState): Promise<void> {
-  if (pi.getSessionName()) return;
+// ── Auto-title model selection ──
+// Prefer a cheap model declared in settings.json (smallModel) for title
+// generation; fall back to the active session model.
+
+const SETTINGS_PATH = path.join(
+  process.env.HOME || process.env.USERPROFILE || "~",
+  ".pi",
+  "agent",
+  "settings.json",
+);
+
+// Thinking levels recognized as a ":level" suffix on a model reference.
+// Mirrors pi's VALID_THINKING_LEVELS; ":off" disables reasoning.
+const TITLE_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+function resolveModelReference(ctx: ExtensionContext, reference: string): Model<Api> | undefined {
+  let ref = reference;
+  let thinkingLevel: string | undefined;
+  const colon = ref.lastIndexOf(":");
+  if (colon !== -1) {
+    const suffix = ref.slice(colon + 1);
+    if (TITLE_THINKING_LEVELS.includes(suffix)) {
+      thinkingLevel = suffix;
+      ref = ref.slice(0, colon);
+    }
+  }
+  let model: Model<Api> | undefined;
+  const slash = ref.indexOf("/");
+  if (slash !== -1) {
+    const provider = ref.slice(0, slash).trim();
+    const modelId = ref.slice(slash + 1).trim();
+    if (provider && modelId) model = ctx.modelRegistry.find(provider, modelId);
+  } else {
+    const lower = ref.toLowerCase();
+    const matches = ctx.modelRegistry.getAll().filter((m) => m.id.toLowerCase() === lower);
+    model = matches.length === 1 ? matches[0] : undefined;
+  }
+  if (model && thinkingLevel === "off") return { ...model, reasoning: false };
+  return model;
+}
+
+function resolveTitleModel(ctx: ExtensionContext): Model<Api> | undefined {
+  try {
+    const raw = fs.readFileSync(SETTINGS_PATH, "utf-8");
+    const settings = JSON.parse(raw) as Record<string, unknown>;
+    const ref = settings.smallModel;
+    if (typeof ref === "string" && ref.trim()) {
+      const model = resolveModelReference(ctx, ref.trim());
+      if (model && ctx.modelRegistry.hasConfiguredAuth(model)) return model;
+    }
+  } catch { /* settings unreadable */ }
+  return ctx.model;
+}
+
+// Core generation, shared by the auto path and the /generate-title command.
+// `force` clears any existing session name first (manual regeneration).
+async function generateTitle(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  state: AppState,
+  prompt: string,
+  force = false,
+): Promise<void> {
   if (state.isAutoTitling) return;
-  if (!ctx.model) return;
-  const branch = ctx.sessionManager.getBranch();
-  if (!branch || branch.length < 2) return;
-  const prompt = buildTitlePrompt(branch);
+  if (force) pi.setSessionName("");
+  else if (pi.getSessionName()) return;
   if (!prompt) return;
+  const model = resolveTitleModel(ctx);
+  if (!model) return;
   state.isAutoTitling = true;
   try {
-    const auth = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model);
+    const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
     if (!auth?.ok || !auth.apiKey) return;
-    const response = await complete(ctx.model, {
+    const response = await complete(model, {
       messages: [
         { role: "user" as const, content: [{ type: "text" as const, text: prompt }], timestamp: Date.now() },
       ],
@@ -409,6 +493,13 @@ async function autoGenerateTitle(pi: ExtensionAPI, ctx: ExtensionContext, state:
     }
   } catch { /* best-effort */ }
   finally { state.isAutoTitling = false; }
+}
+
+async function autoGenerateTitle(pi: ExtensionAPI, ctx: ExtensionContext, state: AppState): Promise<void> {
+  if (pi.getSessionName()) return;
+  const branch = ctx.sessionManager.getBranch();
+  if (!branch || branch.length < 2) return;
+  await generateTitle(pi, ctx, state, buildTitlePrompt(branch));
 }
 
 // ── Widget management ──
@@ -787,4 +878,13 @@ export default function (pi: ExtensionAPI) {
   // ── /statusline command ──
 
   registerStatuslineCommand(pi, configRef, (ctx) => immediateUpdate(ctx), () => state.activeTui);
+
+  // ── /generate-title command ──
+  pi.registerCommand("generate-title", {
+    description: "Regenerate the session title from the conversation (uses smallModel)",
+    handler: async (_args: string, ctx: ExtensionCommandContext) => {
+      const branch = ctx.sessionManager.getBranch();
+      await generateTitle(pi, ctx, state, buildFullConversationPrompt(branch ?? []), true);
+    },
+  });
 }
