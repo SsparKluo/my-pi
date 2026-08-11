@@ -119,6 +119,78 @@ Logs every provider request to `~/.pi/agent/requests/<session>.request.log` — 
 
 ---
 
+### system-prompt
+
+Builds a configurable system prompt while keeping Pi's resource discovery intact.
+
+**File:** `system-prompt.ts`
+
+Configuration is read from:
+
+- `~/.pi/agent/system-prompt.json`
+- `.pi/system-prompt.json` in the trusted project
+
+The project config overrides the global `basePrompt`. Tool entries are merged by name, with project entries overriding global entries.
+
+```json
+{
+  "basePrompt": "You are a focused coding assistant. Follow the user's request and use the available tools when needed.",
+  "tools": {
+    "read": {
+      "snippet": "Read file contents.",
+      "guidelines": [
+        "Read the relevant files before editing them.",
+        "Use this tool when you need exact file contents."
+      ]
+    },
+    "bash": {
+      "snippet": "Run shell commands.",
+      "guidelines": [
+        "Prefer rg for searching files."
+      ]
+    }
+  }
+}
+```
+
+The generated section is shaped like this:
+
+```text
+<tool-use>
+- read: Read file contents.
+  - Read the relevant files before editing them.
+  - Use this tool when you need exact file contents.
+- bash: Run shell commands.
+  - Prefer rg for searching files.
+
+In addition to the tools above, you may have access to other custom tools depending on the project.
+</tool-use>
+```
+
+`basePrompt` is the configurable base section. The plugin then adds the configured `<tool-use>` section (one entry per enabled tool with its snippet and per-tool guidelines), the `<general>` section for cross-cutting guidelines, an opencode-style `<env>` block (working directory, git worktree, git repo flag, platform), `<global_instruction>` for any `AGENTS.md`/`CLAUDE.md` loaded from the global agent dir, `<project_instruction>` for any loaded from the cwd or its ancestors, and `<available_skills>` for skills discovered by Pi. Tool definitions and descriptions are still supplied through Pi's normal tool API rather than copied into this prompt. Only tools currently enabled by Pi are rendered; an unconfigured enabled tool falls back to Pi's own one-line snippet.
+
+```json
+{
+  "basePrompt": "You are a focused coding assistant.",
+  "general": [
+    "Be concise in your responses.",
+    "Show file paths clearly when working with files."
+  ],
+  "tools": {
+    "read": {
+      "snippet": "Read file contents.",
+      "guidelines": [
+        "Read the relevant files before editing them."
+      ]
+    }
+  }
+}
+```
+
+When no `basePrompt` is configured, the extension replaces Pi's available-tools block with a `<tool-use>` tag (or appends one if Pi omitted it), injects a `<general>` section when `general` is configured, and also strips Pi's default `Guidelines:` section (`Be concise`, `Show file paths clearly`, and the `Use bash for file operations` fallback). The rest of Pi's system prompt — the persona line, Pi documentation paths, project environment, AGENTS/skills — is preserved. Project config is read only after Pi trusts the project. Context files and skills are never rediscovered by this extension, so their behavior follows Pi's own loader and flags.
+
+---
+
 ### 429-retry
 
 ![429 limit](https://github.com/user-attachments/assets/907d920d-5d20-4193-b298-416179fc0c69)

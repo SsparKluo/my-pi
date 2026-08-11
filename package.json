@@ -13,6 +13,9 @@
 		"shortcuts.ts",
 		"429-retry.ts",
 		"startup-header.ts",
+		"system-prompt.ts",
+		"system-prompt-core.ts",
+		"system-prompt-env.ts",
 		"status/"
 	],
 	"pi": {
@@ -22,6 +25,7 @@
 			"./shortcuts.ts",
 			"./429-retry.ts",
 			"./startup-header.ts",
+			"./system-prompt.ts",
 			"./status/"
 		]
 	}
