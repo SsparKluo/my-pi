@@ -17,9 +17,11 @@ test("absent file yields defaults and absent=true", () => {
 		assert.equal(absent, true);
 		assert.deepEqual(errors, []);
 		assert.equal(config.bashPreviewLines, DEFAULT_CONFIG.bashPreviewLines);
+		assert.equal(config.bashCallPreviewLines, DEFAULT_CONFIG.bashCallPreviewLines);
 		assert.equal(config.bashRevealCommand, DEFAULT_CONFIG.bashRevealCommand);
 		assert.equal(config.diffMode, DEFAULT_CONFIG.diffMode);
 		assert.equal(config.diffColumnWidth, DEFAULT_CONFIG.diffColumnWidth);
+		assert.equal(config.paddingX, DEFAULT_CONFIG.paddingX);
 		assert.deepEqual(config.enabled, DEFAULT_CONFIG.enabled);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
@@ -33,11 +35,12 @@ test("valid file overrides defaults", () => {
 			path,
 			JSON.stringify({
 				bashPreviewLines: 12,
+				bashCallPreviewLines: 3,
 				bashRevealCommand: false,
-				readPreviewLines: 8,
 				diffMode: "dual",
 				diffColumnWidth: 120,
 				diffSyntaxHighlight: false,
+				paddingX: 4,
 				enabled: { read: false, bash: false },
 			}),
 		);
@@ -45,11 +48,12 @@ test("valid file overrides defaults", () => {
 		assert.equal(absent, false);
 		assert.deepEqual(errors, []);
 		assert.equal(config.bashPreviewLines, 12);
+		assert.equal(config.bashCallPreviewLines, 3);
 		assert.equal(config.bashRevealCommand, false);
-		assert.equal(config.readPreviewLines, 8);
 		assert.equal(config.diffMode, "dual");
 		assert.equal(config.diffColumnWidth, 120);
 		assert.equal(config.diffSyntaxHighlight, false);
+		assert.equal(config.paddingX, 4);
 		assert.equal(config.enabled.read, false);
 		assert.equal(config.enabled.bash, false);
 		// unmentioned tools keep defaults
@@ -67,24 +71,30 @@ test("invalid fields report errors and fall back to defaults", () => {
 			path,
 			JSON.stringify({
 				bashPreviewLines: -3,
+				bashCallPreviewLines: 0,
 				bashRevealCommand: "yes",
 				diffMode: "wide",
 				diffColumnWidth: 0,
+				paddingX: -1,
 				enabled: { read: 1, bogus: true },
 			}),
 		);
 		const { config, errors } = loadConfigFromFile(path);
 		assert.ok(errors.includes("bashPreviewLines must be a non-negative integer"));
+		assert.ok(errors.includes("bashCallPreviewLines must be a positive integer"));
 		assert.ok(errors.includes("bashRevealCommand must be a boolean"));
 		assert.ok(errors.includes("diffMode must be one of auto, single, dual"));
 		assert.ok(errors.includes("diffColumnWidth must be a positive integer"));
+		assert.ok(errors.includes("paddingX must be a non-negative integer"));
 		assert.ok(errors.includes("enabled.read must be a boolean"));
 		assert.ok(errors.includes('enabled has unknown tool "bogus"'));
 		// invalid values keep defaults
 		assert.equal(config.bashPreviewLines, DEFAULT_CONFIG.bashPreviewLines);
+		assert.equal(config.bashCallPreviewLines, DEFAULT_CONFIG.bashCallPreviewLines);
 		assert.equal(config.bashRevealCommand, DEFAULT_CONFIG.bashRevealCommand);
 		assert.equal(config.diffMode, DEFAULT_CONFIG.diffMode);
 		assert.equal(config.diffColumnWidth, DEFAULT_CONFIG.diffColumnWidth);
+		assert.equal(config.paddingX, DEFAULT_CONFIG.paddingX);
 		assert.equal(config.enabled.read, DEFAULT_CONFIG.enabled.read);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });

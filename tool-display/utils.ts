@@ -17,28 +17,11 @@ export type ToolResultLike = {
 	content?: ToolResultContent[];
 };
 
-export type Preview = {
-	previewLines: string[];
-	previewText: string;
-	totalLines: number;
-	hasMore: boolean;
-	remainingLines: number;
-};
-
-export type DiffBar = {
-	added: number;
-	removed: number;
-	neutral: number;
-};
-
 export type DiffStats = {
 	additions: number;
 	removals: number;
 	hunks: number;
 	files: number;
-	format: "unified";
-	summary: string;
-	bar: DiffBar;
 };
 
 const homePath = homedir();
@@ -69,10 +52,6 @@ export function extractTextContent(result: ToolResultLike | undefined): string {
 		.join("\n");
 }
 
-export function hasImageContent(result: ToolResultLike | undefined): boolean {
-	return result?.content?.some((block) => block.type === "image") ?? false;
-}
-
 export function splitTrailingNoticeBlock(text: string): { body: string; notice?: string } {
 	const normalized = normalizeLineEndings(text);
 	const match = normalized.match(noticePattern);
@@ -88,11 +67,6 @@ export function splitTrailingNoticeBlock(text: string): { body: string; notice?:
 
 export function countLines(text: string): number {
 	return splitLines(text).length;
-}
-
-export function countReadLines(text: string): number {
-	const { body } = splitTrailingNoticeBlock(text);
-	return countLines(body);
 }
 
 export function countFindResults(text: string): number {
@@ -137,20 +111,6 @@ export function countFffFindResults(text: string): number {
 	return splitLines(body).filter((line) => line.length > 0).length;
 }
 
-export function buildPreview(text: string, maxLines = 10): Preview {
-	const lines = splitLines(text);
-	const previewLines = lines.slice(0, maxLines);
-	const remainingLines = Math.max(lines.length - previewLines.length, 0);
-
-	return {
-		previewLines,
-		previewText: previewLines.join("\n"),
-		totalLines: lines.length,
-		hasMore: remainingLines > 0,
-		remainingLines,
-	};
-}
-
 export function formatDisplayPath(
 	filePath: string,
 	options: {
@@ -171,38 +131,6 @@ export function formatDisplayPath(
 	}
 
 	return displayPath;
-}
-
-export function buildDiffBar(additions: number, removals: number, width = 10): DiffBar {
-	const total = additions + removals;
-	if (total === 0) {
-		return { added: 0, removed: 0, neutral: width };
-	}
-
-	let added = additions > 0 ? Math.max(1, Math.round((width * additions) / total)) : 0;
-	let removed = removals > 0 ? Math.max(1, Math.round((width * removals) / total)) : 0;
-
-	while (added + removed > width) {
-		if (added >= removed && added > 0) {
-			added -= 1;
-		} else if (removed > 0) {
-			removed -= 1;
-		}
-	}
-
-	while (added + removed < width) {
-		if (additions >= removals) {
-			added += 1;
-		} else {
-			removed += 1;
-		}
-	}
-
-	return {
-		added,
-		removed,
-		neutral: Math.max(width - added - removed, 0),
-	};
 }
 
 export function getDiffStats(diff: string): DiffStats {
@@ -243,18 +171,11 @@ export function getDiffStats(diff: string): DiffStats {
 	}
 
 	const hunks = explicitHunks > 0 ? explicitHunks : inferredHunks;
-	const files = 1;
-	const format = "unified" as const;
-	const hunkLabel = hunks === 1 ? "1 hunk" : `${hunks} hunks`;
-
 	return {
 		additions,
 		removals,
 		hunks,
-		files,
-		format,
-		summary: `diff • +${additions} • -${removals} • ${hunkLabel} • ${files} file • ${format}`,
-		bar: buildDiffBar(additions, removals),
+		files: 1,
 	};
 }
 

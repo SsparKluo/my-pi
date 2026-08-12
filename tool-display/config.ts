@@ -35,27 +35,30 @@ export const ALL_TOOL_NAMES: readonly ToolName[] = [
 export interface ToolDisplayConfig {
 	/** Tail output lines shown for a collapsed bash result. */
 	bashPreviewLines: number;
+	/** Max command lines shown on the bash call; extra lines fold with a count. */
+	bashCallPreviewLines: number;
 	/** On Ctrl+O expand, show the full command above the output (req #2). */
 	bashRevealCommand: boolean;
-	/** Collapsed read preview: number of leading content lines, or 0 for a "loaded N lines" summary only. */
-	readPreviewLines: number;
 	/** Diff layout selection. */
 	diffMode: DiffMode;
 	/** Terminal width at/above which "auto" switches to side-by-side. */
 	diffColumnWidth: number;
 	/** Syntax-highlight diff context lines via pi's built-in highlightCode. */
 	diffSyntaxHighlight: boolean;
+	/** Left padding (spaces) applied to every line of a tool block. */
+	paddingX: number;
 	/** Per-tool opt-out. A tool stays on pi's built-in renderer when false. */
 	enabled: Record<ToolName, boolean>;
 }
 
 export const DEFAULT_CONFIG: ToolDisplayConfig = {
 	bashPreviewLines: 5,
+	bashCallPreviewLines: 6,
 	bashRevealCommand: true,
-	readPreviewLines: 0,
 	diffMode: "auto",
 	diffColumnWidth: 100,
-	diffSyntaxHighlight: true,
+	diffSyntaxHighlight: false,
+	paddingX: 1,
 	enabled: {
 		read: true,
 		write: true,
@@ -131,21 +134,21 @@ export function loadConfigFromFile(configPath: string): LoadConfigResult {
 		}
 	}
 
+	const bashCallPreviewLines = raw.bashCallPreviewLines;
+	if (bashCallPreviewLines !== undefined) {
+		if (isNonNegativeInt(bashCallPreviewLines) && bashCallPreviewLines > 0) {
+			config.bashCallPreviewLines = bashCallPreviewLines;
+		} else {
+			errors.push("bashCallPreviewLines must be a positive integer");
+		}
+	}
+
 	const bashRevealCommand = raw.bashRevealCommand;
 	if (bashRevealCommand !== undefined) {
 		if (typeof bashRevealCommand === "boolean") {
 			config.bashRevealCommand = bashRevealCommand;
 		} else {
 			errors.push("bashRevealCommand must be a boolean");
-		}
-	}
-
-	const readPreviewLines = raw.readPreviewLines;
-	if (readPreviewLines !== undefined) {
-		if (isNonNegativeInt(readPreviewLines)) {
-			config.readPreviewLines = readPreviewLines;
-		} else {
-			errors.push("readPreviewLines must be a non-negative integer");
 		}
 	}
 
@@ -173,6 +176,15 @@ export function loadConfigFromFile(configPath: string): LoadConfigResult {
 			config.diffSyntaxHighlight = diffSyntaxHighlight;
 		} else {
 			errors.push("diffSyntaxHighlight must be a boolean");
+		}
+	}
+
+	const paddingX = raw.paddingX;
+	if (paddingX !== undefined) {
+		if (isNonNegativeInt(paddingX)) {
+			config.paddingX = paddingX;
+		} else {
+			errors.push("paddingX must be a non-negative integer");
 		}
 	}
 

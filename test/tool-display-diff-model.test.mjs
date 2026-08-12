@@ -106,41 +106,37 @@ test("wordDiff on a simple swap", () => {
 	);
 });
 
-test("collapseDistantContext folds long context between change blocks", () => {
-	// Two change groups separated by 8 context lines (> CONTEXT_COLLAPSE_AT=6).
+test("collapseDistantContext keeps 3 context lines around each distant change block", () => {
+	// Seven context lines is the first collapsible run: keep 3 + 3, skip 1.
 	const lines = ["-1 old-a", "+1 new-a"];
-	for (let n = 2; n <= 9; n++) {
+	for (let n = 2; n <= 8; n++) {
 		lines.push(` ${n} ctx-${n}`);
 	}
-	lines.push("-10 old-b", "+10 new-b");
+	lines.push("-9 old-b", "+9 new-b");
 	const rows = buildRows(parseEntries(lines.join("\n")));
-	const types = rows.map((r) => r.type);
-	assert.ok(types.includes("gap"), `expected a gap row, got: ${types.join(",")}`);
-	const gap = rows.find((r) => r.type === "gap");
-	// 8 context lines, keep 1 on each side → skip 6
-	assert.equal(gap.skipped, 6);
-	// No long unbroken context run remains
-	let run = 0;
-	let maxRun = 0;
-	for (const t of types) {
-		if (t === "context") {
-			run++;
-			maxRun = Math.max(maxRun, run);
-		} else {
-			run = 0;
-		}
-	}
-	assert.ok(maxRun <= 1, `context runs should be edge-only, max was ${maxRun}`);
+	const gapIndex = rows.findIndex((row) => row.type === "gap");
+	assert.ok(gapIndex >= 0, "expected a gap row");
+	const gap = rows[gapIndex];
+	assert.equal(gap.skipped, 1);
+	assert.deepEqual(rows.slice(gapIndex - 3, gapIndex).map((row) => row.type), ["context", "context", "context"]);
+	assert.deepEqual(rows.slice(gapIndex + 1, gapIndex + 4).map((row) => row.type), ["context", "context", "context"]);
 });
 
-test("collapseDistantContext leaves short context alone", () => {
-	const diff = ["-1 a", "+1 b", " 2 c", " 3 d", "-4 e", "+4 f"].join("\n");
-	const rows = buildRows(parseEntries(diff));
-	assert.equal(
-		rows.some((r) => r.type === "gap"),
-		false,
-		"short context between edits must not collapse",
-	);
+test("collapseDistantContext leaves six or fewer context lines alone", () => {
+	const lines = ["-1 a", "+1 b"];
+	for (let n = 2; n <= 7; n++) {
+		lines.push(` ${n} ctx-${n}`);
+	}
+	lines.push("-8 e", "+8 f");
+	const rows = buildRows(parseEntries(lines.join("\n")));
+	assert.equal(rows.some((row) => row.type === "gap"), false);
+});
+
+test("collapseDistantContext does not collapse leading or trailing context", () => {
+	const leading = Array.from({ length: 8 }, (_, index) => ` ${index + 1} before-${index + 1}`);
+	const trailing = Array.from({ length: 8 }, (_, index) => ` ${index + 10} after-${index + 1}`);
+	const rows = buildRows(parseEntries([...leading, "-9 old", "+9 new", ...trailing].join("\n")));
+	assert.equal(rows.some((row) => row.type === "gap"), false);
 });
 
 // ── fffind/ffgrep result counting ──

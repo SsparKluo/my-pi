@@ -21,10 +21,14 @@ export type Row =
 	| { type: "meta"; raw: string }
 	| { type: "gap"; skipped: number };
 
-/** Collapse a consecutive context run longer than this into edges + gap. */
-export const CONTEXT_COLLAPSE_AT = 6;
+function isChangeRow(row: Row | undefined): boolean {
+	return row?.type === "mod" || row?.type === "del" || row?.type === "ins";
+}
+
+/** Minimum context-run length between change blocks that is collapsed. */
+export const CONTEXT_COLLAPSE_AT = 7;
 /** Context lines kept on each side of a collapsed gap. */
-export const CONTEXT_EDGE = 1;
+export const CONTEXT_EDGE = 3;
 
 const diffLinePattern = /^([+\- ])(\s*\d*)\s(.*)$/;
 
@@ -154,8 +158,8 @@ export function buildRows(entries: DiffEntry[]): Row[] {
 }
 
 /**
- * When two change blocks are far apart, drop the middle context so the diff
- * stays focused on the edits. Keeps CONTEXT_EDGE lines on each side of a gap.
+ * When two change blocks are far apart, drop their middle context so the diff
+ * stays focused on edits. Keeps CONTEXT_EDGE lines on each side of a gap.
  */
 export function collapseDistantContext(
 	rows: Row[],
@@ -179,7 +183,8 @@ export function collapseDistantContext(
 			i++;
 		}
 		const run = rows.slice(start, i) as Array<Extract<Row, { type: "context" }>>;
-		if (run.length <= collapseAt) {
+		const isBetweenChangeBlocks = isChangeRow(rows[start - 1]) && isChangeRow(rows[i]);
+		if (run.length < collapseAt || !isBetweenChangeBlocks) {
 			out.push(...run);
 			continue;
 		}

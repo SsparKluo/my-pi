@@ -36,17 +36,12 @@ type RgbColor = { r: number; g: number; b: number };
 type DiffPalette = {
 	addRowBgAnsi: string;
 	removeRowBgAnsi: string;
-	containerBgAnsi?: string;
 };
 
-const ANSI_BG_RESET = "\x1b[49m";
 const ANSI_SGR_PATTERN = /\x1b\[([0-9;]*)m/g;
-const ADD_ROW_BACKGROUND_MIX_RATIO = 0.24;
-const REMOVE_ROW_BACKGROUND_MIX_RATIO = 0.12;
-const ADDITION_TINT_TARGET: RgbColor = { r: 84, g: 190, b: 118 };
-const DELETION_TINT_TARGET: RgbColor = { r: 232, g: 95, b: 122 };
+const ANSI_BG_RESET = "\x1b[49m";
 
-// ── ANSI / color math (adapted from sids) ──────────────────────────────────
+// ── ANSI helpers ───────────────────────────────────────────────────────────
 
 function normalizeCodeWhitespace(text: string): string {
 	return text.replace(/\t/g, " ");
@@ -116,60 +111,9 @@ function applyLineBackgroundToWidth(
 		return "";
 	}
 	const fitted = fitToWidth(text, width);
-	const stableText = keepBackgroundAcrossResets(fitted, rowBgAnsi);
+	// Skip SGR rewriting when the line has no escapes — common without syntax highlight.
+	const stableText = fitted.includes("\x1b") ? keepBackgroundAcrossResets(fitted, rowBgAnsi) : fitted;
 	return `${rowBgAnsi}${stableText}${restoreBgAnsi}`;
-}
-
-function ansi256ToRgb(code: number): RgbColor {
-	if (code < 0) {
-		return { r: 0, g: 0, b: 0 };
-	}
-	if (code <= 15) {
-		const base16: RgbColor[] = [
-			{ r: 0, g: 0, b: 0 }, { r: 128, g: 0, b: 0 }, { r: 0, g: 128, b: 0 }, { r: 128, g: 128, b: 0 },
-			{ r: 0, g: 0, b: 128 }, { r: 128, g: 0, b: 128 }, { r: 0, g: 128, b: 128 }, { r: 192, g: 192, b: 192 },
-			{ r: 128, g: 128, b: 128 }, { r: 255, g: 0, b: 0 }, { r: 0, g: 255, b: 0 }, { r: 255, g: 255, b: 0 },
-			{ r: 0, g: 0, b: 255 }, { r: 255, g: 0, b: 255 }, { r: 0, g: 255, b: 255 }, { r: 255, g: 255, b: 255 },
-		];
-		return base16[code] ?? { r: 255, g: 255, b: 255 };
-	}
-	if (code >= 232) {
-		const value = Math.max(0, Math.min(255, 8 + (code - 232) * 10));
-		return { r: value, g: value, b: value };
-	}
-	const cube = code - 16;
-	const levels = [0, 95, 135, 175, 215, 255];
-	const blue = cube % 6;
-	const green = Math.floor(cube / 6) % 6;
-	const red = Math.floor(cube / 36) % 6;
-	return { r: levels[red] ?? 0, g: levels[green] ?? 0, b: levels[blue] ?? 0 };
-}
-
-function parseAnsiColorCode(ansi: string | undefined): RgbColor | null {
-	if (!ansi) {
-		return null;
-	}
-	const rgbMatch = /\x1b\[(?:3|4)8;2;(\d{1,3});(\d{1,3});(\d{1,3})m/.exec(ansi);
-	if (rgbMatch) {
-		const r = Number.parseInt(rgbMatch[1] ?? "0", 10);
-		const g = Number.parseInt(rgbMatch[2] ?? "0", 10);
-		const b = Number.parseInt(rgbMatch[3] ?? "0", 10);
-		if (Number.isFinite(r) && Number.isFinite(g) && Number.isFinite(b)) {
-			return {
-				r: Math.max(0, Math.min(255, r)),
-				g: Math.max(0, Math.min(255, g)),
-				b: Math.max(0, Math.min(255, b)),
-			};
-		}
-	}
-	const ansi256Match = /\x1b\[(?:3|4)8;5;(\d{1,3})m/.exec(ansi);
-	if (ansi256Match) {
-		const code = Number.parseInt(ansi256Match[1] ?? "0", 10);
-		if (Number.isFinite(code)) {
-			return ansi256ToRgb(code);
-		}
-	}
-	return null;
 }
 
 function rgbToBgAnsi(color: RgbColor): string {
@@ -177,15 +121,6 @@ function rgbToBgAnsi(color: RgbColor): string {
 	const g = Math.max(0, Math.min(255, Math.round(color.g)));
 	const b = Math.max(0, Math.min(255, Math.round(color.b)));
 	return `\x1b[48;2;${r};${g};${b}m`;
-}
-
-function mixRgb(base: RgbColor, tint: RgbColor, ratio: number): RgbColor {
-	const clamped = Math.max(0, Math.min(1, ratio));
-	return {
-		r: base.r * (1 - clamped) + tint.r * clamped,
-		g: base.g * (1 - clamped) + tint.g * clamped,
-		b: base.b * (1 - clamped) + tint.b * clamped,
-	};
 }
 
 function readThemeAnsi(theme: DiffTheme, kind: "fg" | "bg", slot: string): string | undefined {
@@ -203,24 +138,17 @@ function readThemeAnsi(theme: DiffTheme, kind: "fg" | "bg", slot: string): strin
 }
 
 function resolveDiffPalette(theme: DiffTheme): DiffPalette {
-	const containerBgAnsi =
+	// Use the same soft success/error slab colors as pi's default renderShell.
+	const successBg =
 		readThemeAnsi(theme, "bg", "toolSuccessBg") ??
-		readThemeAnsi(theme, "bg", "toolPendingBg") ??
+		rgbToBgAnsi({ r: 40, g: 50, b: 40 });
+	const errorBg =
 		readThemeAnsi(theme, "bg", "toolErrorBg") ??
-		readThemeAnsi(theme, "bg", "userMessageBg");
-	const baseBg =
-		parseAnsiColorCode(containerBgAnsi) ??
-		parseAnsiColorCode(readThemeAnsi(theme, "bg", "userMessageBg")) ??
-		{ r: 32, g: 35, b: 42 };
-	const addFg = parseAnsiColorCode(readThemeAnsi(theme, "fg", "toolDiffAdded")) ?? { r: 88, g: 173, b: 88 };
-	const removeFg = parseAnsiColorCode(readThemeAnsi(theme, "fg", "toolDiffRemoved")) ?? { r: 196, g: 98, b: 98 };
-	const addTint = mixRgb(addFg, ADDITION_TINT_TARGET, 0.35);
-	const removeTint = mixRgb(removeFg, DELETION_TINT_TARGET, 0.65);
+		rgbToBgAnsi({ r: 60, g: 40, b: 40 });
 
 	return {
-		addRowBgAnsi: rgbToBgAnsi(mixRgb(baseBg, addTint, ADD_ROW_BACKGROUND_MIX_RATIO)),
-		removeRowBgAnsi: rgbToBgAnsi(mixRgb(baseBg, removeTint, REMOVE_ROW_BACKGROUND_MIX_RATIO)),
-		containerBgAnsi,
+		addRowBgAnsi: successBg,
+		removeRowBgAnsi: errorBg,
 	};
 }
 
@@ -266,10 +194,9 @@ function renderSegs(segs: Seg[], fgColor: string, theme: DiffTheme): string {
 
 // ── Summary / meta (adapted from sids) ─────────────────────────────────────
 
-function formatSummary(diff: string, width: number, theme: DiffTheme): string {
-	const stats = getDiffStats(diff);
+function formatSummary(stats: ReturnType<typeof getDiffStats>, width: number, theme: DiffTheme): string {
 	const summary = [
-		theme.fg("toolOutput", `↳ ${emphasis(theme, "diff")}`),
+		theme.fg("toolOutput", `${emphasis(theme, "diff")}`),
 		theme.fg("toolDiffAdded", `+${stats.additions}`),
 		theme.fg("toolDiffRemoved", `-${stats.removals}`),
 		theme.fg("muted", `${stats.hunks} ${stats.hunks === 1 ? "hunk" : "hunks"}`),
@@ -288,9 +215,35 @@ function formatMetaLine(rawLine: string, width: number, theme: DiffTheme): strin
 	return truncateToWidth(theme.fg(color, normalized), width);
 }
 
+function gapLabel(skipped: number): string {
+	const count = skipped === 1 ? "1 unchanged line" : `${skipped} unchanged lines`;
+	return `··· ${count} ···`;
+}
+
+function formatGapCell(skipped: number, width: number, theme: DiffTheme): string {
+	const label = gapLabel(skipped);
+	const leftPadding = " ".repeat(Math.max(Math.floor((width - visibleWidth(label)) / 2), 0));
+	return fitToWidth(theme.fg("muted", `${leftPadding}${label}`), width);
+}
+
 function formatGapLine(skipped: number, width: number, theme: DiffTheme): string {
-	const label = skipped === 1 ? "1 unchanged line" : `${skipped} unchanged lines`;
-	return truncateToWidth(theme.fg("muted", `  ··· ${label} ···`), width);
+	return formatGapCell(skipped, width, theme);
+}
+
+function formatDualGapLine(
+	skipped: number,
+	numW: number,
+	leftW: number,
+	rightW: number,
+	width: number,
+	theme: DiffTheme,
+): string {
+	const numberCell = " ".repeat(numW);
+	const gutter = " │ ";
+	return fitToWidth(
+		`${numberCell}${gutter}${formatGapCell(skipped, leftW, theme)}${gutter}${numberCell}${gutter}${formatGapCell(skipped, rightW, theme)}`,
+		width,
+	);
 }
 
 // ── Single-column rendering ────────────────────────────────────────────────
@@ -322,10 +275,13 @@ function renderSingleLine(
 	const continuationPrefix = `${" ".repeat(2)}${colorize(theme, "dim", " ".repeat(numW), bg)} ${divider}`;
 	const codeWidth = Math.max(width - visibleWidth(prefix), 0);
 	const wrapped = wrapToWidth(content, codeWidth);
-	const restoreBg = palette.containerBgAnsi ?? ANSI_BG_RESET;
 	return wrapped.map((line, index) => {
 		const rowText = `${index === 0 ? prefix : continuationPrefix}${line}`;
-		return bg ? applyLineBackgroundToWidth(rowText, width, bg, restoreBg) : fitToWidth(rowText, width);
+		if (!bg) {
+			return fitToWidth(rowText, width);
+		}
+		// Reset bg at EOL so self-shell lines don't bleed into the next row.
+		return applyLineBackgroundToWidth(rowText, width, bg, ANSI_BG_RESET);
 	});
 }
 
@@ -334,11 +290,12 @@ function renderSingleColumn(
 	numW: number,
 	width: number,
 	theme: DiffTheme,
-	highlighter: (line: string) => string,
+	highlighter: (line: string, index: number) => string,
 	palette: DiffPalette,
 ): string[] {
 	const out: string[] = [];
-	for (const row of rows) {
+	for (let i = 0; i < rows.length; i++) {
+		const row = rows[i]!;
 		if (row.type === "meta") {
 			out.push(formatMetaLine(row.raw, width, theme));
 			continue;
@@ -350,7 +307,7 @@ function renderSingleColumn(
 		if (row.type === "context") {
 			out.push(
 				...renderSingleLine(
-					" ", "dim", String(row.oldNum), "dim", highlighter(row.content), undefined,
+					" ", "dim", String(row.oldNum), "dim", highlighter(row.content, i), undefined,
 					numW, width, theme, palette,
 				),
 			);
@@ -402,10 +359,9 @@ function renderDualColumn(
 	numW: number,
 	width: number,
 	theme: DiffTheme,
-	highlighter: (line: string) => string,
+	highlighter: (line: string, index: number) => string,
 	palette: DiffPalette,
 ): string[] {
-	const restoreBg = palette.containerBgAnsi ?? ANSI_BG_RESET;
 	// Layout: <lnum> │ <left> │ <rnum> │ <right>
 	const overhead = 2 * numW + 9; // three " │ " separators (3 each) + two number columns
 	const contentTotal = Math.max(width - overhead, 4);
@@ -418,13 +374,14 @@ function renderDualColumn(
 	const blank = " ".repeat(colW);
 
 	const out: string[] = [];
-	for (const row of rows) {
+	for (let i = 0; i < rows.length; i++) {
+		const row = rows[i]!;
 		if (row.type === "meta") {
 			out.push(formatMetaLine(row.raw, width, theme));
 			continue;
 		}
 		if (row.type === "gap") {
-			out.push(formatGapLine(row.skipped, width, theme));
+			out.push(formatDualGapLine(row.skipped, numW, leftW, rightW, width, theme));
 			continue;
 		}
 
@@ -438,8 +395,9 @@ function renderDualColumn(
 		if (row.type === "context") {
 			leftNum = String(row.oldNum);
 			rightNum = String(row.newNum);
-			leftContent = fitToWidth(highlighter(row.content), leftW);
-			rightContent = fitToWidth(highlighter(row.content), rightW);
+			const highlighted = highlighter(row.content, i);
+			leftContent = fitToWidth(highlighted, leftW);
+			rightContent = fitToWidth(highlighted, rightW);
 		} else if (row.type === "del") {
 			leftNum = String(row.oldNum);
 			leftBg = palette.removeRowBgAnsi;
@@ -463,10 +421,10 @@ function renderDualColumn(
 		const leftNumText = colorize(theme, leftBg ? "toolDiffRemoved" : "dim", leftNum.padStart(numW, " "), leftBg);
 		const rightNumText = colorize(theme, rightBg ? "toolDiffAdded" : "dim", rightNum.padStart(numW, " "), rightBg);
 		const leftCell = leftBg
-			? applyLineBackgroundToWidth(leftContent, leftW, leftBg, restoreBg)
+			? applyLineBackgroundToWidth(leftContent, leftW, leftBg, ANSI_BG_RESET)
 			: fitToWidth(leftContent, leftW);
 		const rightCell = rightBg
-			? applyLineBackgroundToWidth(rightContent, rightW, rightBg, restoreBg)
+			? applyLineBackgroundToWidth(rightContent, rightW, rightBg, ANSI_BG_RESET)
 			: fitToWidth(rightContent, rightW);
 
 		const line = `${leftNumText}${leftGutter}${leftCell}${midGutter}${rightNumText}${leftGutter}${rightCell}`;
@@ -482,6 +440,18 @@ export function renderDiff(diff: string, options: DiffRenderOptions, theme: Diff
 	const numW = lineNumberWidth(rows);
 	const highlighter = createCodeHighlighter(options.filePath, options.syntaxHighlight);
 	const palette = resolveDiffPalette(theme);
+	const stats = getDiffStats(diff);
+
+	// Highlight context once up front so dual-column never re-highlights the same line twice
+	// and width-only reflows stay layout-only.
+	const contextText = new Map<number, string>();
+	for (let i = 0; i < rows.length; i++) {
+		const row = rows[i];
+		if (row?.type === "context") {
+			contextText.set(i, highlighter(row.content));
+		}
+	}
+	const contextHighlighter = (line: string, index: number) => contextText.get(index) ?? highlighter(line);
 
 	let cachedKey: string | undefined;
 	let cachedLines: string[] | undefined;
@@ -496,22 +466,21 @@ export function renderDiff(diff: string, options: DiffRenderOptions, theme: Diff
 				return cachedLines;
 			}
 
-			const summary = formatSummary(diff, safeWidth, theme);
+			const summary = formatSummary(stats, safeWidth, theme);
 			const separator = theme.fg("dim", "─".repeat(safeWidth));
 			const body =
 				rows.length === 0
 					? [theme.fg("muted", "(empty diff)")]
 					: useDual
-						? renderDualColumn(rows, numW, safeWidth, theme, highlighter, palette)
-						: renderSingleColumn(rows, numW, safeWidth, theme, highlighter, palette);
+						? renderDualColumn(rows, numW, safeWidth, theme, contextHighlighter, palette)
+						: renderSingleColumn(rows, numW, safeWidth, theme, contextHighlighter, palette);
 
 			cachedLines = [summary, separator, ...body];
 			cachedKey = `${safeWidth}:${useDual}`;
 			return cachedLines;
 		},
-		invalidate() {
-			cachedKey = undefined;
-			cachedLines = undefined;
-		},
+		// Diff content is immutable after the tool result lands. Keep the width cache across
+		// ToolExecution.invalidate()/updateDisplay cycles so we do not re-layout every keystroke.
+		invalidate() {},
 	};
 }

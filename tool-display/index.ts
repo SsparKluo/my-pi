@@ -18,21 +18,19 @@ import {
 	createWriteTool,
 	ExtensionRunner,
 } from "@earendil-works/pi-coding-agent";
-import { Text, type Component } from "@earendil-works/pi-tui";
+import { Text, visibleWidth, type Component } from "@earendil-works/pi-tui";
 import { renderDiff } from "./diff.ts";
-import { DEFAULT_CONFIG, loadConfig, type ToolDisplayConfig, type ToolName } from "./config.ts";
+import { ALL_TOOL_NAMES, loadConfig, type ToolDisplayConfig, type ToolName } from "./config.ts";
 import {
-	buildPreview,
 	countFffFindResults,
 	countFffGrepMatches,
 	countFindResults,
 	countGrepMatches,
 	countLines,
 	countLsEntries,
-	countReadLines,
 	extractTextContent,
 	formatDisplayPath,
-	hasImageContent,
+	getDiffStats,
 	isErrorResult,
 	splitTrailingNoticeBlock,
 } from "./utils.ts";
@@ -67,6 +65,158 @@ function text(text: string): Component {
 	return new Text(text, 0, 0);
 }
 
+function empty(): Component {
+	return {
+		render() {
+			return [];
+		},
+		invalidate() {},
+	};
+}
+
+type CallChrome = {
+	isError?: boolean;
+	isPartial?: boolean;
+};
+
+/** Left pad before `●` on call lines. From config.paddingX. */
+let toolBlockPad = " ";
+/** Hang result lines under the call title (after `{pad}● `). */
+let toolResultPad = "   ";
+
+function applyChromeConfig(config: ToolDisplayConfig): void {
+	const pad = Math.max(0, config.paddingX);
+	toolBlockPad = " ".repeat(pad);
+	// Align under body text after the status marker: `{pad}● ` is pad + 2 cols.
+	toolResultPad = " ".repeat(pad + 2);
+}
+
+function statusDot(theme: Theme, chrome: CallChrome = {}): string {
+	if (chrome.isError) {
+		return theme.fg("error", "●");
+	}
+	if (chrome.isPartial) {
+		return theme.fg("warning", "●");
+	}
+	return theme.fg("success", "●");
+}
+
+/**
+ * Strip trailing spaces used by Text to fill width, so we can safely re-prefix.
+ * Keeps ANSI; only trims ASCII spaces at the end of the visible line.
+ */
+function stripTrailingFill(line: string): string {
+	return line.replace(/[ ]+$/u, "");
+}
+
+/** True when a rendered line has no visible non-space characters (ANSI ignored). */
+function isVisuallyBlank(line: string): boolean {
+	return stripTrailingFill(line).replace(/\x1b\[[0-9;]*m/g, "").trim() === "";
+}
+
+function finishChromeLine(indent: string, core: string): string {
+	// Do not right-pad to terminal width: trailing spaces often wrap into a fake blank line.
+	// Self-shell has no full-width background that needs filling.
+	return `${indent}${core}`;
+}
+
+/** Pad every result line so content hangs under the call title (after `● `). */
+function padBlock(body: Component): Component {
+	let cachedWidth: number | undefined;
+	let cachedLines: string[] | undefined;
+	return {
+		render(width: number): string[] {
+			const safeWidth = Math.max(width, 1);
+			if (cachedLines && cachedWidth === safeWidth) {
+				return cachedLines;
+			}
+			const indent = toolResultPad;
+			const indentCols = visibleWidth(indent);
+			const innerWidth = Math.max(safeWidth - indentCols, 1);
+			const raw = body.render(innerWidth).map((line) => stripTrailingFill(line));
+			// Drop leading blanks so we don't get a gap under the call line; keep mid-output blanks.
+			let start = 0;
+			while (start < raw.length && isVisuallyBlank(raw[start]!)) {
+				start += 1;
+			}
+			const lines = raw
+				.slice(start)
+				.map((core) => finishChromeLine(indent, isVisuallyBlank(core) ? "" : core));
+			cachedWidth = safeWidth;
+			cachedLines = lines;
+			return lines;
+		},
+		invalidate() {},
+	};
+}
+
+/**
+ * Call chrome: `{pad}● body`, with wrapped continuations hanging under the title
+ * (same indent as results). Always go through padCallBlock — baking the prefix into
+ * a single Text lets wrap restart at column 0 and lose padding.
+ */
+function callLine(theme: Theme, chrome: CallChrome, body: string): Component {
+	return padCallBlock(text(body), theme, chrome);
+}
+
+/** Pad a multi-line body and put `●` on the first line. Used for foreign tool wraps. */
+function padCallBlock(body: Component, theme: Theme, chrome: CallChrome = {}): Component {
+	let cachedWidth: number | undefined;
+	let cachedLines: string[] | undefined;
+	return {
+		render(width: number): string[] {
+			const safeWidth = Math.max(width, 1);
+			if (cachedLines && cachedWidth === safeWidth) {
+				return cachedLines;
+			}
+			const indent = toolBlockPad;
+			const resultIndent = toolResultPad;
+			const dot = statusDot(theme, chrome);
+			const firstPrefix = `${indent}${dot} `;
+			const firstCols = visibleWidth(firstPrefix);
+			// First line: `{pad}● body`; continuation hangs under the title like results.
+			const firstInner = Math.max(safeWidth - firstCols, 1);
+			const raw = body
+				.render(firstInner)
+				.map((line) => stripTrailingFill(line))
+				.filter((line) => !isVisuallyBlank(line));
+			const out =
+				raw.length === 0
+					? [firstPrefix.trimEnd()]
+					: raw.map((core, index) =>
+							finishChromeLine(index === 0 ? firstPrefix : resultIndent, core),
+					  );
+			cachedWidth = safeWidth;
+			cachedLines = out;
+			return out;
+		},
+		invalidate() {},
+	};
+}
+
+/**
+ * Generic self-shell chrome for any tool renderer pair.
+ * Body renderers return content only (no pad/dot); this layer adds:
+ * - renderShell: "self"
+ * - block pad (config.paddingX) on every line
+ * - status ● on the first call line
+ */
+function withSelfShell<TCall extends (...args: any[]) => Component, TResult extends (...args: any[]) => Component>(handlers: {
+	renderCall: TCall;
+	renderResult: TResult;
+}): { renderShell: "self"; renderCall: TCall; renderResult: TResult } {
+	return {
+		renderShell: "self",
+		renderCall: ((...args: any[]) => {
+			const theme = args[1] as Theme;
+			const context = (args[2] ?? {}) as CallChrome;
+			return padCallBlock(handlers.renderCall(...args), theme, context);
+		}) as TCall,
+		renderResult: ((...args: any[]) => padBlock(handlers.renderResult(...args))) as TResult,
+	};
+}
+
+
 function pluralize(count: number, singular: string, plural = `${singular}s`): string {
 	return count === 1 ? singular : plural;
 }
@@ -81,10 +231,6 @@ function editorHint(description: string, theme: Theme): string {
 
 function expandHint(theme: Theme): string {
 	return `(${editorHint("to expand", theme)})`;
-}
-
-function remainingLinesHint(remainingLines: number, theme: Theme): string {
-	return `${theme.fg("muted", `... (${remainingLines} more ${pluralize(remainingLines, "line")}, `)}${editorHint("to expand", theme)}${theme.fg("muted", ")")}`;
 }
 
 function fullOutputHint(skippedLines: number, theme: Theme): string {
@@ -111,9 +257,14 @@ function renderVisualTail(
 	theme: Theme,
 	previewLines: number,
 ): Component {
+	let cachedWidth: number | undefined;
+	let cachedLines: string[] | undefined;
 	return {
 		render(width: number): string[] {
 			const safeWidth = Math.max(width, 1);
+			if (cachedLines && cachedWidth === safeWidth) {
+				return cachedLines;
+			}
 			const outputLines = new Text(output, 0, 0).render(safeWidth);
 			const skippedLines = Math.max(outputLines.length - previewLines, 0);
 			const lines: string[] = [];
@@ -127,8 +278,11 @@ function renderVisualTail(
 			if (suffix) {
 				lines.push(...new Text(suffix, 0, 0).render(safeWidth));
 			}
+			cachedWidth = safeWidth;
+			cachedLines = lines;
 			return lines;
 		},
+		// Content is fixed for a given result snapshot; keep width cache across invalidates.
 		invalidate() {},
 	};
 }
@@ -185,10 +339,10 @@ function bashTimingLine(
 	const duration = formatDuration(end - state.startedAt);
 	const when = formatTimestamp(state.startedAt);
 	const label = isPartial ? "elapsed" : "took";
-	return theme.fg("muted", `↳ ${label} ${duration} · ${when}`);
+	return theme.fg("muted", `${label} ${duration} · ${when}`);
 }
 
-/** Expanded bash view: full command (wrapped) above, full output below. */
+/** Expanded bash view: output (+ full command only when call folded it away). */
 function renderExpandedBash(
 	command: string,
 	output: string,
@@ -196,26 +350,33 @@ function renderExpandedBash(
 	warning: string | undefined,
 	timing: string | undefined,
 	theme: Theme,
+	revealCommand: boolean,
 ): Component {
+	let cachedWidth: number | undefined;
+	let cachedLines: string[] | undefined;
 	return {
 		render(width: number): string[] {
 			const safeWidth = Math.max(width, 1);
+			if (cachedLines && cachedWidth === safeWidth) {
+				return cachedLines;
+			}
 			const lines: string[] = [];
 			if (status) {
 				lines.push(...new Text(status, 0, 0).render(safeWidth));
 			}
-			if (command.length > 0) {
+			// Only re-print the command when the call view truncated it.
+			if (revealCommand && command.length > 0) {
 				lines.push(theme.fg("dim", "command"));
 				const commandStyled = `${theme.fg("toolTitle", theme.bold("$"))} ${theme.fg("accent", command)}`;
 				lines.push(...new Text(commandStyled, 0, 0).render(safeWidth));
 			}
 			if (output.length > 0) {
-				if (command.length > 0) {
+				if (revealCommand && command.length > 0) {
 					lines.push(theme.fg("dim", "output"));
 				}
 				lines.push(...new Text(output, 0, 0).render(safeWidth));
 			} else if (!status) {
-				lines.push(theme.fg("muted", "↳ (no output)"));
+				lines.push(theme.fg("muted", "(no output)"));
 			}
 			if (warning) {
 				lines.push(...new Text(warning, 0, 0).render(safeWidth));
@@ -223,6 +384,8 @@ function renderExpandedBash(
 			if (timing) {
 				lines.push(...new Text(timing, 0, 0).render(safeWidth));
 			}
+			cachedWidth = safeWidth;
+			cachedLines = lines;
 			return lines;
 		},
 		invalidate() {},
@@ -248,6 +411,7 @@ function getEditPrepareArguments(tool: BuiltInTools["edit"] | undefined) {
 }
 
 function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayConfig) {
+	applyChromeConfig(config);
 	const referenceTools = getBuiltInTools(cwd);
 	const editPrepareArguments = getEditPrepareArguments(referenceTools.edit);
 
@@ -255,44 +419,29 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 		pi.registerTool({
 			name: "read",
 			label: "read",
+			renderShell: "self",
 			description: referenceTools.read.description,
 			...getToolPromptMetadata(pi, "read"),
 			parameters: referenceTools.read.parameters,
 			async execute(toolCallId, params, signal, onUpdate, ctx) {
 				return getBuiltInTools(ctx.cwd).read.execute(toolCallId, params, signal, onUpdate);
 			},
-			renderCall(args, theme) {
+			renderCall(args, theme, context) {
 				const displayPath = formatDisplayPath(args.path ?? "", {
 					offset: typeof args.offset === "number" ? args.offset : undefined,
 					limit: typeof args.limit === "number" ? args.limit : undefined,
 				});
-				return text(`${theme.fg("toolTitle", theme.bold("read"))} ${theme.fg("accent", displayPath)}`);
+				return callLine(theme, context, `${theme.fg("toolTitle", theme.bold("read"))} ${theme.fg("accent", displayPath)}`);
 			},
-			renderResult(result, { expanded, isPartial }, theme) {
+			renderResult(result, { isPartial }, theme) {
 				if (isPartial) {
-					return text(theme.fg("muted", "↳ loading..."));
+					return padBlock(text(theme.fg("muted", "loading...")));
 				}
 				const resultText = extractTextContent(result);
 				if (isErrorResult(result, resultText)) {
-					return renderRawText(resultText, theme, true);
+					return padBlock(renderRawText(resultText, theme, true));
 				}
-				if (hasImageContent(result)) {
-					return renderRawText(resultText || "Read image file", theme, false);
-				}
-				const { body } = splitTrailingNoticeBlock(resultText);
-				if (!expanded) {
-					if (config.readPreviewLines > 0) {
-						const preview = buildPreview(body, config.readPreviewLines);
-						const display = theme.fg("dim", preview.previewText);
-						const hint = preview.hasMore ? remainingLinesHint(preview.remainingLines, theme) : undefined;
-						return text(joinSections(display, hint));
-					}
-					const lineCount = countReadLines(resultText);
-					const summary = `${theme.fg("muted", `↳ loaded ${formatLineCount(lineCount)}`)} ${expandHint(theme)}`;
-					return text(joinSections(summary));
-				}
-				const languageHint = body.length > 0 ? body : theme.fg("muted", "(empty file)");
-				return text(joinSections(languageHint));
+				return empty();
 			},
 		});
 	}
@@ -301,33 +450,34 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 		pi.registerTool({
 			name: "write",
 			label: "write",
+			renderShell: "self",
 			description: referenceTools.write.description,
 			...getToolPromptMetadata(pi, "write"),
 			parameters: referenceTools.write.parameters,
 			async execute(toolCallId, params, signal, onUpdate, ctx) {
 				return getBuiltInTools(ctx.cwd).write.execute(toolCallId, params, signal, onUpdate);
 			},
-			renderCall(args, theme) {
+			renderCall(args, theme, context) {
 				const displayPath = formatDisplayPath(args.path ?? "");
 				const lineCount = countLines(args.content ?? "");
-				return text(`${theme.fg("toolTitle", theme.bold("write"))} ${theme.fg("accent", displayPath)} ${theme.fg("muted", `(${formatLineCount(lineCount)})`)}`);
+				return callLine(theme, context, `${theme.fg("toolTitle", theme.bold("write"))} ${theme.fg("accent", displayPath)} ${theme.fg("muted", `(${formatLineCount(lineCount)})`)}`);
 			},
 			renderResult(result, { expanded, isPartial }, theme, context) {
 				if (isPartial) {
-					return text(theme.fg("muted", "Writing..."));
+					return padBlock(text(theme.fg("muted", "Writing...")));
 				}
 				const resultText = extractTextContent(result);
 				if (isErrorResult(result, resultText)) {
-					return renderRawText(resultText, theme, true);
+					return padBlock(renderRawText(resultText, theme, true));
 				}
 				const content = typeof context.args?.content === "string" ? context.args.content : "";
 				const lineCount = countLines(content);
 				if (!expanded) {
-					const summary = `${theme.fg("muted", `↳ wrote ${formatLineCount(lineCount)}`)} ${expandHint(theme)}`;
-					return text(summary);
+					const summary = `${theme.fg("muted", `wrote ${formatLineCount(lineCount)}`)} ${expandHint(theme)}`;
+					return padBlock(text(summary));
 				}
 				const display = content.length > 0 ? theme.fg("dim", content) : theme.fg("muted", "(empty file)");
-				return text(display);
+				return padBlock(text(display));
 			},
 		});
 	}
@@ -336,52 +486,103 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 		pi.registerTool({
 			name: "bash",
 			label: "bash",
+			renderShell: "self",
 			description: referenceTools.bash.description,
 			...getToolPromptMetadata(pi, "bash"),
 			parameters: referenceTools.bash.parameters,
 			async execute(toolCallId, params, signal, onUpdate, ctx) {
 				return getBuiltInTools(ctx.cwd).bash.execute(toolCallId, params, signal, onUpdate);
 			},
-			renderCall(args, theme) {
-				let value = `${theme.fg("toolTitle", theme.bold("bash"))} ${theme.fg("toolTitle", theme.bold("$"))} ${theme.fg("accent", args.command ?? "")}`;
+			renderCall(args, theme, context) {
+				const command = typeof args.command === "string" ? args.command : "";
+				const lines = command.replace(/\r\n/g, "\n").split("\n");
+				const maxLines = Math.max(1, config.bashCallPreviewLines);
+				const shown = lines.slice(0, maxLines);
+				const hidden = Math.max(0, lines.length - shown.length);
+				const first = shown[0] ?? "";
+				const rest = shown.slice(1);
+				let head = `${theme.fg("toolTitle", theme.bold("bash"))} ${theme.fg("toolTitle", theme.bold("$"))} ${theme.fg("accent", first)}`;
 				if (typeof args.timeout === "number") {
-					value += ` ${theme.fg("muted", `(timeout ${args.timeout}s)`)}`;
+					head += ` ${theme.fg("muted", `(timeout ${args.timeout}s)`)}`;
 				}
-				return text(value);
+				if (rest.length === 0 && hidden === 0) {
+					return callLine(theme, context, head);
+				}
+				// Multi-line call: hang under ●; fold when over bashCallPreviewLines.
+				const bodyLines = [head, ...rest.map((line) => theme.fg("accent", line))];
+				if (hidden > 0) {
+					bodyLines.push(
+						theme.fg("muted", `… ${hidden} more ${pluralize(hidden, "line")} (${editorHint("to expand", theme)})`),
+					);
+				}
+				return padCallBlock(text(bodyLines.join("\n")), theme, context);
 			},
 			renderResult(result, { expanded, isPartial }, theme, context) {
 				const resultText = extractTextContent(result);
 				const isError = isErrorResult(result, resultText);
 				const command = typeof context.args?.command === "string" ? context.args.command : "";
-				const state = context.state as BashRenderState;
+				const state = context.state as BashRenderState & {
+					viewKey?: string;
+					viewComponent?: Component;
+				};
 				const timing = bashTimingLine(state, isPartial, context.executionStarted, context.invalidate, theme);
+				// While running, timing changes every second so the key must include it.
+				// After completion the result is immutable and the component is reused across invalidates.
+				const viewKey = [
+					expanded ? "1" : "0",
+					isPartial ? "1" : "0",
+					isError ? "1" : "0",
+					resultText,
+					command,
+					timing ?? "",
+				].join("\0");
+				if (state.viewKey === viewKey && state.viewComponent) {
+					return state.viewComponent;
+				}
 
+				let component: Component;
 				if (isError) {
 					const output = resultText.trim();
-					const prefix = theme.fg("error", "↳ command failed");
-					if (!expanded && output.length > 0) {
-						return renderVisualTail(theme.fg("error", output), prefix, timing, theme, config.bashPreviewLines);
+					const prefix = theme.fg("error", "command failed");
+					component = !expanded && output.length > 0
+						? renderVisualTail(theme.fg("error", output), prefix, timing, theme, config.bashPreviewLines)
+						: text(joinSections(prefix, output.length > 0 ? theme.fg("error", output) : undefined, timing));
+				} else {
+					const { body, notice } = splitTrailingNoticeBlock(resultText);
+					const previewSource = (body.length > 0 ? body : resultText).trim();
+					const status = isPartial ? theme.fg("warning", "running...") : undefined;
+					const warning = warningLine(notice, theme);
+
+					if (!expanded && previewSource.length > 0) {
+						component = renderVisualTail(
+							theme.fg("dim", previewSource),
+							status,
+							joinSections(warning, timing),
+							theme,
+							config.bashPreviewLines,
+						);
+					} else if (expanded) {
+						const commandFolded = command.replace(/\r\n/g, "\n").split("\n").length > config.bashCallPreviewLines;
+						component = renderExpandedBash(
+							command,
+							previewSource,
+							status,
+							warning,
+							timing,
+							theme,
+							config.bashRevealCommand && commandFolded,
+						);
+					} else {
+						const display = previewSource.length > 0
+							? theme.fg("dim", previewSource)
+							: !isPartial ? theme.fg("muted", "(no output)") : undefined;
+						component = text(joinSections(status, display, warning, timing));
 					}
-					return text(joinSections(prefix, output.length > 0 ? theme.fg("error", output) : undefined, timing));
 				}
-
-				const { body, notice } = splitTrailingNoticeBlock(resultText);
-				const previewSource = (body.length > 0 ? body : resultText).trim();
-				const status = isPartial ? theme.fg("warning", "running...") : undefined;
-				const warning = warningLine(notice, theme);
-
-				if (!expanded && previewSource.length > 0) {
-					return renderVisualTail(theme.fg("dim", previewSource), status, joinSections(warning, timing), theme, config.bashPreviewLines);
-				}
-
-				if (expanded) {
-					return renderExpandedBash(command, previewSource, status, warning, timing, theme);
-				}
-
-				const display = previewSource.length > 0
-					? theme.fg("dim", previewSource)
-					: !isPartial ? theme.fg("muted", "↳ (no output)") : undefined;
-				return text(joinSections(status, display, warning, timing));
+				const framed = padBlock(component);
+				state.viewKey = viewKey;
+				state.viewComponent = framed;
+				return framed;
 			},
 		});
 	}
@@ -390,44 +591,77 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 		pi.registerTool({
 			name: "edit",
 			label: "edit",
+			renderShell: "self",
 			description: referenceTools.edit.description,
-			renderShell: "default",
 			...getToolPromptMetadata(pi, "edit"),
 			parameters: referenceTools.edit.parameters,
 			...(editPrepareArguments ? { prepareArguments: editPrepareArguments } : {}),
 			async execute(toolCallId, params, signal, onUpdate, ctx) {
 				return getBuiltInTools(ctx.cwd).edit.execute(toolCallId, params, signal, onUpdate);
 			},
-			renderCall(args, theme) {
+			renderCall(args, theme, context) {
 				const displayPath = formatDisplayPath(args.path ?? "");
 				const edits = Array.isArray(args.edits) ? args.edits.length : 0;
 				const suffix = edits > 0 ? ` ${theme.fg("muted", `(${edits} ${pluralize(edits, "block")})`)}` : "";
-				return text(`${theme.fg("toolTitle", theme.bold("edit"))} ${theme.fg("accent", displayPath)}${suffix}`);
+				return callLine(theme, context, `${theme.fg("toolTitle", theme.bold("edit"))} ${theme.fg("accent", displayPath)}${suffix}`);
 			},
-			renderResult(result, { isPartial }, theme, context) {
+			renderResult(result, { expanded, isPartial }, theme, context) {
 				if (isPartial) {
-					return text(theme.fg("muted", "Editing..."));
+					return padBlock(text(theme.fg("muted", "Editing...")));
 				}
 				const resultText = extractTextContent(result);
 				if (context.isError || isErrorResult(result, resultText)) {
-					return renderRawText(resultText, theme, true);
+					return padBlock(renderRawText(resultText, theme, true));
 				}
 				const details = (result as { details?: { diff?: unknown } }).details;
 				const diff = typeof details?.diff === "string" ? details.diff : "";
 				if (!diff) {
-					return text(theme.fg("success", "Applied"));
+					return padBlock(text(theme.fg("success", "Applied")));
 				}
 				const filePath = typeof context.args?.path === "string" ? context.args.path : undefined;
-				return renderDiff(
+				const state = context.state as {
+					diffKey?: string;
+					diffComponent?: Component;
+				};
+				// Collapsed by default; expand with Ctrl+O for the full adaptive diff.
+				const diffKey = [
+					expanded ? "1" : "0",
 					diff,
-					{
-						filePath,
-						mode: config.diffMode,
-						columnWidth: config.diffColumnWidth,
-						syntaxHighlight: config.diffSyntaxHighlight,
-					},
-					theme,
-				);
+					filePath ?? "",
+					config.diffMode,
+					String(config.diffColumnWidth),
+					config.diffSyntaxHighlight ? "1" : "0",
+				].join("\0");
+				if (state.diffKey === diffKey && state.diffComponent) {
+					return state.diffComponent;
+				}
+				let component: Component;
+				if (!expanded) {
+					const stats = getDiffStats(diff);
+					const summary = [
+						theme.fg("muted", "diff"),
+						theme.fg("toolDiffAdded", `+${stats.additions}`),
+						theme.fg("toolDiffRemoved", `-${stats.removals}`),
+						theme.fg("muted", `${stats.hunks} ${pluralize(stats.hunks, "hunk")}`),
+					].join(theme.fg("muted", " • "));
+					component = padBlock(text(`${summary} ${expandHint(theme)}`));
+				} else {
+					component = padBlock(
+						renderDiff(
+							diff,
+							{
+								filePath,
+								mode: config.diffMode,
+								columnWidth: config.diffColumnWidth,
+								syntaxHighlight: config.diffSyntaxHighlight,
+							},
+							theme,
+						),
+					);
+				}
+				state.diffKey = diffKey;
+				state.diffComponent = component;
+				return component;
 			},
 		});
 	}
@@ -436,35 +670,36 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 		pi.registerTool({
 			name: "grep",
 			label: "grep",
+			renderShell: "self",
 			description: referenceTools.grep.description,
 			...getToolPromptMetadata(pi, "grep"),
 			parameters: referenceTools.grep.parameters,
 			async execute(toolCallId, params, signal, onUpdate, ctx) {
 				return getBuiltInTools(ctx.cwd).grep.execute(toolCallId, params, signal, onUpdate);
 			},
-			renderCall(args, theme) {
+			renderCall(args, theme, context) {
 				let value = `${theme.fg("toolTitle", theme.bold("grep"))} ${theme.fg("accent", args.literal ? JSON.stringify(args.pattern ?? "") : `/${args.pattern ?? ""}/`)}`;
 				value += theme.fg("muted", ` in ${formatDisplayPath(args.path ?? ".")}`);
 				if (args.glob) {
 					value += ` ${theme.fg("dim", `(${args.glob})`)}`;
 				}
-				return text(value);
+				return callLine(theme, context, value);
 			},
 			renderResult(result, { expanded, isPartial }, theme) {
 				if (isPartial) {
-					return text(theme.fg("muted", "Searching..."));
+					return padBlock(text(theme.fg("muted", "Searching...")));
 				}
 				const resultText = extractTextContent(result);
 				if (isErrorResult(result, resultText)) {
-					return renderRawText(resultText, theme, true);
+					return padBlock(renderRawText(resultText, theme, true));
 				}
 				const { body, notice } = splitTrailingNoticeBlock(resultText);
 				if (expanded) {
-					return text(joinSections(body || resultText || theme.fg("muted", "(no matches)"), warningLine(notice, theme)));
+					return padBlock(text(joinSections(body || resultText || theme.fg("muted", "(no matches)"), warningLine(notice, theme))));
 				}
 				const count = countGrepMatches(resultText);
-				const summary = `${theme.fg("muted", `↳ ${count} ${pluralize(count, "match")}`)} ${expandHint(theme)}`;
-				return text(joinSections(summary, warningLine(notice, theme)));
+				const summary = `${theme.fg("muted", `${count} ${pluralize(count, "match")}`)} ${expandHint(theme)}`;
+				return padBlock(text(joinSections(summary, warningLine(notice, theme))));
 			},
 		});
 	}
@@ -473,35 +708,36 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 		pi.registerTool({
 			name: "find",
 			label: "find",
+			renderShell: "self",
 			description: referenceTools.find.description,
 			...getToolPromptMetadata(pi, "find"),
 			parameters: referenceTools.find.parameters,
 			async execute(toolCallId, params, signal, onUpdate, ctx) {
 				return getBuiltInTools(ctx.cwd).find.execute(toolCallId, params, signal, onUpdate);
 			},
-			renderCall(args, theme) {
+			renderCall(args, theme, context) {
 				let value = `${theme.fg("toolTitle", theme.bold("find"))} ${theme.fg("accent", args.pattern ?? "")}`;
 				value += theme.fg("muted", ` in ${formatDisplayPath(args.path ?? ".")}`);
 				if (typeof args.limit === "number") {
 					value += ` ${theme.fg("dim", `(limit ${args.limit})`)}`;
 				}
-				return text(value);
+				return callLine(theme, context, value);
 			},
 			renderResult(result, { expanded, isPartial }, theme) {
 				if (isPartial) {
-					return text(theme.fg("muted", "Searching..."));
+					return padBlock(text(theme.fg("muted", "Searching...")));
 				}
 				const resultText = extractTextContent(result);
 				if (isErrorResult(result, resultText)) {
-					return renderRawText(resultText, theme, true);
+					return padBlock(renderRawText(resultText, theme, true));
 				}
 				const { body, notice } = splitTrailingNoticeBlock(resultText);
 				if (expanded) {
-					return text(joinSections(body || resultText || theme.fg("muted", "(no files)"), warningLine(notice, theme)));
+					return padBlock(text(joinSections(body || resultText || theme.fg("muted", "(no files)"), warningLine(notice, theme))));
 				}
 				const count = countFindResults(resultText);
-				const summary = `${theme.fg("muted", `↳ ${count} ${pluralize(count, "file")}`)} ${expandHint(theme)}`;
-				return text(joinSections(summary, warningLine(notice, theme)));
+				const summary = `${theme.fg("muted", `${count} ${pluralize(count, "file")}`)} ${expandHint(theme)}`;
+				return padBlock(text(joinSections(summary, warningLine(notice, theme))));
 			},
 		});
 	}
@@ -510,34 +746,35 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 		pi.registerTool({
 			name: "ls",
 			label: "ls",
+			renderShell: "self",
 			description: referenceTools.ls.description,
 			...getToolPromptMetadata(pi, "ls"),
 			parameters: referenceTools.ls.parameters,
 			async execute(toolCallId, params, signal, onUpdate, ctx) {
 				return getBuiltInTools(ctx.cwd).ls.execute(toolCallId, params, signal, onUpdate);
 			},
-			renderCall(args, theme) {
+			renderCall(args, theme, context) {
 				let value = `${theme.fg("toolTitle", theme.bold("ls"))} ${theme.fg("accent", formatDisplayPath(args.path ?? "."))}`;
 				if (typeof args.limit === "number") {
 					value += ` ${theme.fg("dim", `(limit ${args.limit})`)}`;
 				}
-				return text(value);
+				return callLine(theme, context, value);
 			},
 			renderResult(result, { expanded, isPartial }, theme) {
 				if (isPartial) {
-					return text(theme.fg("muted", "Listing..."));
+					return padBlock(text(theme.fg("muted", "Listing...")));
 				}
 				const resultText = extractTextContent(result);
 				if (isErrorResult(result, resultText)) {
-					return renderRawText(resultText, theme, true);
+					return padBlock(renderRawText(resultText, theme, true));
 				}
 				const { body, notice } = splitTrailingNoticeBlock(resultText);
 				if (expanded) {
-					return text(joinSections(body || resultText || theme.fg("muted", "(empty directory)"), warningLine(notice, theme)));
+					return padBlock(text(joinSections(body || resultText || theme.fg("muted", "(empty directory)"), warningLine(notice, theme))));
 				}
 				const count = countLsEntries(resultText);
-				const summary = `${theme.fg("muted", `↳ ${count} ${pluralize(count, "entry")}`)} ${expandHint(theme)}`;
-				return text(joinSections(summary, warningLine(notice, theme)));
+				const summary = `${theme.fg("muted", `${count} ${pluralize(count, "entry")}`)} ${expandHint(theme)}`;
+				return padBlock(text(joinSections(summary, warningLine(notice, theme))));
 			},
 		});
 	}
@@ -553,13 +790,13 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 const FFF_TOOL_NAMES = ["ffgrep", "fffind"] as const;
 type FffToolName = (typeof FFF_TOOL_NAMES)[number];
 
-const FFF_PATCH_FLAG = Symbol.for("@ssparkluo/my-pi.tool-display.fff-patch");
+const TOOL_SHELL_PATCH_FLAG = Symbol.for("@ssparkluo/my-pi.tool-display.tool-shell-patch");
+const fffRendererPatched = new WeakSet<object>();
+const foreignShellPatched = new WeakSet<object>();
 
-/** Live config for the FFF renderer patch (updated on session_start). */
-let fffDisplayConfig: ToolDisplayConfig = {
-	...DEFAULT_CONFIG,
-	enabled: { ...DEFAULT_CONFIG.enabled },
-};
+/** Loaded before the first registry build; refreshed on session_start. */
+let fffDisplayConfig: ToolDisplayConfig = loadConfig().config;
+applyChromeConfig(fffDisplayConfig);
 
 function totalMatchedFromDetails(result: { details?: unknown }): number | undefined {
 	const details = result.details;
@@ -572,7 +809,7 @@ function totalMatchedFromDetails(result: { details?: unknown }): number | undefi
 
 function createFffGrepRenderers() {
 	return {
-		renderCall(args: Record<string, unknown>, theme: Theme) {
+		renderCall(args: Record<string, unknown>, theme: Theme, context?: CallChrome) {
 			const pattern = typeof args.pattern === "string" ? args.pattern : "";
 			const path = typeof args.path === "string" ? args.path : ".";
 			let value = `${theme.fg("toolTitle", theme.bold("ffgrep"))} ${theme.fg("accent", `/${pattern}/`)}`;
@@ -602,7 +839,7 @@ function createFffGrepRenderers() {
 				return text(body || resultText || theme.fg("muted", "(no matches)"));
 			}
 			const count = totalMatchedFromDetails(result) ?? countFffGrepMatches(resultText);
-			const summary = `${theme.fg("muted", `↳ ${count} ${pluralize(count, "match")}`)} ${expandHint(theme)}`;
+			const summary = `${theme.fg("muted", `${count} ${pluralize(count, "match")}`)} ${expandHint(theme)}`;
 			return text(summary);
 		},
 	};
@@ -610,7 +847,7 @@ function createFffGrepRenderers() {
 
 function createFffFindRenderers() {
 	return {
-		renderCall(args: Record<string, unknown>, theme: Theme) {
+		renderCall(args: Record<string, unknown>, theme: Theme, context?: CallChrome) {
 			const pattern = typeof args.pattern === "string" ? args.pattern : "";
 			const path = typeof args.path === "string" ? args.path : ".";
 			let value = `${theme.fg("toolTitle", theme.bold("fffind"))} ${theme.fg("accent", pattern)}`;
@@ -640,7 +877,7 @@ function createFffFindRenderers() {
 				return text(body || resultText || theme.fg("muted", "(no files)"));
 			}
 			const count = totalMatchedFromDetails(result) ?? countFffFindResults(resultText);
-			const summary = `${theme.fg("muted", `↳ ${count} ${pluralize(count, "file")}`)} ${expandHint(theme)}`;
+			const summary = `${theme.fg("muted", `${count} ${pluralize(count, "file")}`)} ${expandHint(theme)}`;
 			return text(summary);
 		},
 	};
@@ -659,41 +896,106 @@ function isToolEnabled(name: ToolName): boolean {
 	return fffDisplayConfig.enabled[name] !== false;
 }
 
+function isOurToolName(name: string): name is ToolName {
+	return (ALL_TOOL_NAMES as readonly string[]).includes(name);
+}
+
+type PatchableToolDefinition = {
+	name?: string;
+	renderShell?: "default" | "self";
+	renderCall?: (...args: any[]) => Component;
+	renderResult?: (...args: any[]) => Component;
+};
+
 /**
- * Inject compact fffind/ffgrep renderers onto whatever extension owns those
- * tools (normally @ff-labs/pi-fff). Preserves the original execute.
+ * Apply the generic self-shell without editing tool source:
+ * - fffind/ffgrep: inject our compact body renderers + withSelfShell
+ * - our 7 built-ins: already registered with padCallBlock/padBlock; pin self
+ * - every other tool: wrap existing renderCall/renderResult with withSelfShell
+ *   (execute untouched; no foreign source changes)
  */
-function installFffRendererPatch(): void {
+function installToolShellPatch(): void {
 	const proto = ExtensionRunner.prototype as unknown as Record<string | symbol, unknown>;
-	if (proto[FFF_PATCH_FLAG]) {
+	if (proto[TOOL_SHELL_PATCH_FLAG]) {
 		return;
 	}
 
 	const original = proto.getAllRegisteredTools as (this: ExtensionRunner) => Array<{
-		definition: {
-			name?: string;
-			renderCall?: unknown;
-			renderResult?: unknown;
-		};
+		definition: PatchableToolDefinition;
 	}>;
 	proto.getAllRegisteredTools = function patchedGetAllRegisteredTools(this: ExtensionRunner) {
 		const tools = original.call(this);
 		for (const tool of tools) {
-			const name = tool.definition.name;
-			if (typeof name !== "string" || !isFffToolName(name) || !isToolEnabled(name)) {
+			const definition = tool.definition;
+			const name = definition.name;
+			if (typeof name !== "string") {
 				continue;
 			}
-			const renderer = fffRenderers[name];
-			tool.definition.renderCall = renderer.renderCall;
-			tool.definition.renderResult = renderer.renderResult;
+
+			// FFF: replace body renderers, then apply the same generic shell.
+			if (isFffToolName(name) && isToolEnabled(name)) {
+				if (!fffRendererPatched.has(definition)) {
+					const shelled = withSelfShell(fffRenderers[name]);
+					definition.renderShell = shelled.renderShell;
+					definition.renderCall = shelled.renderCall;
+					definition.renderResult = shelled.renderResult;
+					fffRendererPatched.add(definition);
+					foreignShellPatched.add(definition);
+				}
+				continue;
+			}
+
+			// Our compact overrides already include pad + ●; only pin self shell.
+			if (isOurToolName(name) && isToolEnabled(name)) {
+				definition.renderShell = "self";
+				continue;
+			}
+
+			// Foreign tools: apply self shell + pad/dot without swallowing their output.
+			// Critical: do NOT invent an empty renderResult — when it's missing, pi falls
+			// back to createResultFallback() which shows the tool's text content.
+			if (foreignShellPatched.has(definition)) {
+				continue;
+			}
+			const toolName = name;
+			const origCall = definition.renderCall;
+			const origResult = definition.renderResult;
+			definition.renderShell = "self";
+			definition.renderCall = ((...args: any[]) => {
+				const theme = args[1] as Theme;
+				const context = (args[2] ?? {}) as CallChrome;
+				if (origCall) {
+					return padCallBlock(origCall(...args), theme, context);
+				}
+				return callLine(theme, context, theme.fg("toolTitle", theme.bold(toolName)));
+			}) as typeof definition.renderCall;
+			if (origResult) {
+				definition.renderResult = ((...args: any[]) => padBlock(origResult(...args))) as typeof definition.renderResult;
+			} else {
+				// Mirror ToolExecution.createResultFallback + our pad — do not leave empty.
+				definition.renderResult = ((result: { content?: Array<{ type: string; text?: string }>; isError?: boolean }, { isPartial }: { isPartial: boolean }, theme: Theme) => {
+					if (isPartial) {
+						return empty();
+					}
+					const resultText = extractTextContent(result);
+					if (!resultText.trim()) {
+						return empty();
+					}
+					if (isErrorResult(result, resultText)) {
+						return padBlock(renderRawText(resultText, theme, true));
+					}
+					return padBlock(text(theme.fg("toolOutput", resultText)));
+				}) as typeof definition.renderResult;
+			}
+			foreignShellPatched.add(definition);
 		}
 		return tools;
 	};
-	proto[FFF_PATCH_FLAG] = true;
+	proto[TOOL_SHELL_PATCH_FLAG] = true;
 }
 
-// Install as early as this extension loads so the first registry build is patched.
-installFffRendererPatch();
+// Install early so the first registry build picks up shell + FFF overrides.
+installToolShellPatch();
 
 export default function (pi: ExtensionAPI) {
 	let registered = false;
@@ -708,9 +1010,10 @@ export default function (pi: ExtensionAPI) {
 			console.error(`[tool-display] config errors:\n${errors.map((e) => `  - ${e}`).join("\n")}`);
 		}
 		fffDisplayConfig = config;
+		applyChromeConfig(config);
 		const activeTools = pi.getActiveTools();
 		registerOverrides(pi, ctx.cwd, config);
-		// registerOverrides triggers refreshTools, which re-runs the FFF renderer patch with live config.
+		// registerOverrides triggers refreshTools, which re-runs the shell/FFF patch with live config.
 		pi.setActiveTools(activeTools);
 		registered = true;
 	});
