@@ -239,7 +239,7 @@ function formatDualGapLine(
 	theme: DiffTheme,
 ): string {
 	const numberCell = " ".repeat(numW);
-	const gutter = " │ ";
+	const gutter = theme.fg("dim", " │ ");
 	return fitToWidth(
 		`${numberCell}${gutter}${formatGapCell(skipped, leftW, theme)}${gutter}${numberCell}${gutter}${formatGapCell(skipped, rightW, theme)}`,
 		width,
@@ -305,9 +305,11 @@ function renderSingleColumn(
 			continue;
 		}
 		if (row.type === "context") {
+			const highlighted = highlighter(row.content, i);
+			const contextColored = highlighted.includes("\x1b") ? highlighted : theme.fg("toolDiffContext", highlighted);
 			out.push(
 				...renderSingleLine(
-					" ", "dim", String(row.oldNum), "dim", highlighter(row.content, i), undefined,
+					" ", "dim", String(row.oldNum), "dim", contextColored, undefined,
 					numW, width, theme, palette,
 				),
 			);
@@ -369,8 +371,8 @@ function renderDualColumn(
 	const leftW = colW;
 	const rightW = Math.max(contentTotal - colW, 1);
 
-	const leftGutter = " │ ";
-	const midGutter = " │ ";
+	const leftGutter = theme.fg("dim", " │ ");
+	const midGutter = theme.fg("dim", " │ ");
 	const blank = " ".repeat(colW);
 
 	const out: string[] = [];
@@ -396,8 +398,9 @@ function renderDualColumn(
 			leftNum = String(row.oldNum);
 			rightNum = String(row.newNum);
 			const highlighted = highlighter(row.content, i);
-			leftContent = fitToWidth(highlighted, leftW);
-			rightContent = fitToWidth(highlighted, rightW);
+			const contextColored = highlighted.includes("\x1b") ? highlighted : theme.fg("toolDiffContext", highlighted);
+			leftContent = fitToWidth(contextColored, leftW);
+			rightContent = fitToWidth(contextColored, rightW);
 		} else if (row.type === "del") {
 			leftNum = String(row.oldNum);
 			leftBg = palette.removeRowBgAnsi;

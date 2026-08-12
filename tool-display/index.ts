@@ -18,7 +18,7 @@ import {
 	createWriteTool,
 	ExtensionRunner,
 } from "@earendil-works/pi-coding-agent";
-import { Text, visibleWidth, type Component } from "@earendil-works/pi-tui";
+import { Text, type Component } from "@earendil-works/pi-tui";
 import { renderDiff } from "./diff.ts";
 import { ALL_TOOL_NAMES, loadConfig, type ToolDisplayConfig, type ToolName } from "./config.ts";
 import {
@@ -83,12 +83,17 @@ type CallChrome = {
 let toolBlockPad = " ";
 /** Hang result lines under the call title (after `{pad}● `). */
 let toolResultPad = "   ";
+/** Pre-computed widths (avoid visibleWidth per render). */
+let toolBlockPadCols = 1;
+let toolResultPadCols = 3;
 
 function applyChromeConfig(config: ToolDisplayConfig): void {
 	const pad = Math.max(0, config.paddingX);
 	toolBlockPad = " ".repeat(pad);
+	toolBlockPadCols = pad;
 	// Align under body text after the status marker: `{pad}● ` is pad + 2 cols.
 	toolResultPad = " ".repeat(pad + 2);
+	toolResultPadCols = pad + 2;
 }
 
 function statusDot(theme: Theme, chrome: CallChrome = {}): string {
@@ -102,16 +107,26 @@ function statusDot(theme: Theme, chrome: CallChrome = {}): string {
 }
 
 /**
- * Strip trailing spaces used by Text to fill width, so we can safely re-prefix.
- * Keeps ANSI; only trims ASCII spaces at the end of the visible line.
+ * Strip trailing spaces and detect visual blankness in a single pass.
+ * Returns { core, blank } where core has trailing fill removed.
  */
-function stripTrailingFill(line: string): string {
-	return line.replace(/[ ]+$/u, "");
-}
-
-/** True when a rendered line has no visible non-space characters (ANSI ignored). */
-function isVisuallyBlank(line: string): boolean {
-	return stripTrailingFill(line).replace(/\x1b\[[0-9;]*m/g, "").trim() === "";
+function stripAndCheck(line: string): { core: string; blank: boolean } {
+	// Scan for any visible (non-space, non-ANSI) character while finding the last non-fill char.
+	let inAnsi = false;
+	let hasContent = false;
+	let lastContent = -1;
+	for (let i = 0; i < line.length; i++) {
+		const ch = line.charCodeAt(i);
+		if (ch === 0x1b) { inAnsi = true; lastContent = i; continue; }
+		if (inAnsi) { if (ch === 0x6d) inAnsi = false; lastContent = i; continue; } // 'm'
+		if (ch === 0x20) continue; // space — possible fill
+		lastContent = i;
+		hasContent = true;
+	}
+	return {
+		core: lastContent < 0 ? "" : line.slice(0, lastContent + 1),
+		blank: !hasContent,
+	};
 }
 
 function finishChromeLine(indent: string, core: string): string {
@@ -131,17 +146,16 @@ function padBlock(body: Component): Component {
 				return cachedLines;
 			}
 			const indent = toolResultPad;
-			const indentCols = visibleWidth(indent);
-			const innerWidth = Math.max(safeWidth - indentCols, 1);
-			const raw = body.render(innerWidth).map((line) => stripTrailingFill(line));
+			const innerWidth = Math.max(safeWidth - toolResultPadCols, 1);
+			const raw = body.render(innerWidth).map(stripAndCheck);
 			// Drop leading blanks so we don't get a gap under the call line; keep mid-output blanks.
 			let start = 0;
-			while (start < raw.length && isVisuallyBlank(raw[start]!)) {
+			while (start < raw.length && raw[start]!.blank) {
 				start += 1;
 			}
 			const lines = raw
 				.slice(start)
-				.map((core) => finishChromeLine(indent, isVisuallyBlank(core) ? "" : core));
+				.map((item) => finishChromeLine(indent, item.blank ? "" : item.core));
 			cachedWidth = safeWidth;
 			cachedLines = lines;
 			return lines;
@@ -173,18 +187,17 @@ function padCallBlock(body: Component, theme: Theme, chrome: CallChrome = {}): C
 			const resultIndent = toolResultPad;
 			const dot = statusDot(theme, chrome);
 			const firstPrefix = `${indent}${dot} `;
-			const firstCols = visibleWidth(firstPrefix);
-			// First line: `{pad}● body`; continuation hangs under the title like results.
+			const firstCols = toolBlockPadCols + 2; // pad + "● "
 			const firstInner = Math.max(safeWidth - firstCols, 1);
 			const raw = body
 				.render(firstInner)
-				.map((line) => stripTrailingFill(line))
-				.filter((line) => !isVisuallyBlank(line));
+				.map(stripAndCheck)
+				.filter((item) => !item.blank);
 			const out =
 				raw.length === 0
 					? [firstPrefix.trimEnd()]
-					: raw.map((core, index) =>
-							finishChromeLine(index === 0 ? firstPrefix : resultIndent, core),
+					: raw.map((item, index) =>
+							finishChromeLine(index === 0 ? firstPrefix : resultIndent, item.core),
 					  );
 			cachedWidth = safeWidth;
 			cachedLines = out;
@@ -374,7 +387,7 @@ function renderExpandedBash(
 				if (revealCommand && command.length > 0) {
 					lines.push(theme.fg("dim", "output"));
 				}
-				lines.push(...new Text(output, 0, 0).render(safeWidth));
+				lines.push(...new Text(theme.fg("toolOutput", output), 0, 0).render(safeWidth));
 			} else if (!status) {
 				lines.push(theme.fg("muted", "(no output)"));
 			}
@@ -476,7 +489,7 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 					const summary = `${theme.fg("muted", `wrote ${formatLineCount(lineCount)}`)} ${expandHint(theme)}`;
 					return padBlock(text(summary));
 				}
-				const display = content.length > 0 ? theme.fg("dim", content) : theme.fg("muted", "(empty file)");
+				const display = content.length > 0 ? theme.fg("toolOutput", content) : theme.fg("muted", "(empty file)");
 				return padBlock(text(display));
 			},
 		});
@@ -555,7 +568,7 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 
 					if (!expanded && previewSource.length > 0) {
 						component = renderVisualTail(
-							theme.fg("dim", previewSource),
+							theme.fg("toolOutput", previewSource),
 							status,
 							joinSections(warning, timing),
 							theme,
@@ -574,7 +587,7 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 						);
 					} else {
 						const display = previewSource.length > 0
-							? theme.fg("dim", previewSource)
+							? theme.fg("toolOutput", previewSource)
 							: !isPartial ? theme.fg("muted", "(no output)") : undefined;
 						component = text(joinSections(status, display, warning, timing));
 					}
@@ -695,7 +708,7 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 				}
 				const { body, notice } = splitTrailingNoticeBlock(resultText);
 				if (expanded) {
-					return padBlock(text(joinSections(body || resultText || theme.fg("muted", "(no matches)"), warningLine(notice, theme))));
+					return padBlock(text(theme.fg("toolOutput", joinSections(body || resultText || theme.fg("muted", "(no matches)"), warningLine(notice, theme)))));
 				}
 				const count = countGrepMatches(resultText);
 				const summary = `${theme.fg("muted", `${count} ${pluralize(count, "match")}`)} ${expandHint(theme)}`;
@@ -733,7 +746,7 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 				}
 				const { body, notice } = splitTrailingNoticeBlock(resultText);
 				if (expanded) {
-					return padBlock(text(joinSections(body || resultText || theme.fg("muted", "(no files)"), warningLine(notice, theme))));
+					return padBlock(text(theme.fg("toolOutput", joinSections(body || resultText || theme.fg("muted", "(no files)"), warningLine(notice, theme)))));
 				}
 				const count = countFindResults(resultText);
 				const summary = `${theme.fg("muted", `${count} ${pluralize(count, "file")}`)} ${expandHint(theme)}`;
@@ -770,7 +783,7 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 				}
 				const { body, notice } = splitTrailingNoticeBlock(resultText);
 				if (expanded) {
-					return padBlock(text(joinSections(body || resultText || theme.fg("muted", "(empty directory)"), warningLine(notice, theme))));
+					return padBlock(text(theme.fg("toolOutput", joinSections(body || resultText || theme.fg("muted", "(empty directory)"), warningLine(notice, theme)))));
 				}
 				const count = countLsEntries(resultText);
 				const summary = `${theme.fg("muted", `${count} ${pluralize(count, "entry")}`)} ${expandHint(theme)}`;
@@ -836,7 +849,7 @@ function createFffGrepRenderers() {
 			}
 			const { body } = splitTrailingNoticeBlock(resultText);
 			if (expanded) {
-				return text(body || resultText || theme.fg("muted", "(no matches)"));
+				return text(theme.fg("toolOutput", body || resultText || theme.fg("muted", "(no matches)")));
 			}
 			const count = totalMatchedFromDetails(result) ?? countFffGrepMatches(resultText);
 			const summary = `${theme.fg("muted", `${count} ${pluralize(count, "match")}`)} ${expandHint(theme)}`;
@@ -874,7 +887,7 @@ function createFffFindRenderers() {
 			}
 			const { body } = splitTrailingNoticeBlock(resultText);
 			if (expanded) {
-				return text(body || resultText || theme.fg("muted", "(no files)"));
+				return text(theme.fg("toolOutput", body || resultText || theme.fg("muted", "(no files)")));
 			}
 			const count = totalMatchedFromDetails(result) ?? countFffFindResults(resultText);
 			const summary = `${theme.fg("muted", `${count} ${pluralize(count, "file")}`)} ${expandHint(theme)}`;
