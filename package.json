@@ -6,13 +6,16 @@
   "type": "module",
   "main": "./src/index.ts",
   "pi": {
-    "extensions": ["./src/index.ts"]
+    "extensions": [
+      "./src/index.ts"
+    ]
   },
   "scripts": {
     "check": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
+    "minimatch": "10.2.5",
     "unbash": "4.0.8"
   },
   "peerDependencies": {

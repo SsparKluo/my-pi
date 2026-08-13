@@ -6,7 +6,7 @@ Modes bundle a permission policy (flat `allow`/`deny`/`ask`/`classify` format),
 enter/exit/per-turn prompts, and an AI bash classifier. Mode state persists per
 session and changes are broadcast to other components.
 
-> Status: scaffold (Layer 0). Functionality lands incrementally.
+> Status: Layer 4 complete (mode lifecycle + permission + ask + bash cascade + AI classifier).
 
 ## Install (dev)
 

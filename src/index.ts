@@ -1,6 +1,22 @@
-import { Key } from "@earendil-works/pi-tui";
+import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { getConfigPath, loadConfig, type PiModeConfig } from "./config.ts";
+import { Key } from "@earendil-works/pi-tui";
+import { PREVIEW_BASH_SUBJECT, showAskDialog } from "./ask.ts";
+import { evaluateBashCommand } from "./bash.ts";
+import {
+	classifyCommands,
+	collectAgentsMd,
+	lastUserTexts,
+	parseModelRef,
+} from "./classifier.ts";
+import { getConfigPath, loadConfig, type Action, type PiModeConfig } from "./config.ts";
+import {
+	evaluatePermission,
+	extractSubject,
+	SessionApprovals,
+	subjectKind,
+	visibleTools,
+} from "./permission.ts";
 
 const STATE_ENTRY = "pi-mode-state";
 const EVENT_CHANGED = "pi-mode:changed";
@@ -8,17 +24,16 @@ const EVENT_CHANGED = "pi-mode:changed";
 type ChangeReason = "startup" | "resume" | "reload" | "switch";
 
 /**
- * Layer 1 — mode lifecycle (prompt-only). Loads config, exposes `/mode`
- * (command + selector), a cycle shortcut, and `--mode`; persists/restores the
- * active mode per session; injects onEnter/onExit (visible) and perTurn
- * (system-prompt) prompts; and broadcasts `pi-mode:changed` so other components
- * (and the footer status) can react. Permission gating, bash, and the
- * classifier arrive in later layers.
+ * Layer 4 — mode lifecycle + permission + ask + bash cascade + AI classifier.
  */
 export default function piMode(pi: ExtensionAPI): void {
 	const config: PiModeConfig = loadConfig();
 
 	let currentMode: string | undefined;
+	let baselineTools: string[] | undefined;
+	const approvals = new SessionApprovals();
+	const classifyCache = new Map<string, Action>();
+	let agentsMd = "";
 
 	pi.registerFlag("pi-mode", {
 		description: "Start in a specific pi-mode (e.g. --pi-mode plan)",
@@ -69,7 +84,21 @@ export default function piMode(pi: ExtensionAPI): void {
 		}
 
 		pi.events.emit(EVENT_CHANGED, { mode: name, previous, reason: opts.reason });
+		applyToolsForMode(name);
 		setStatus(ctx);
+	}
+
+	function applyToolsForMode(name: string): void {
+		const rules = config.modes[name]?.permission;
+		if (!rules) {
+			if (baselineTools) {
+				pi.setActiveTools(baselineTools);
+				baselineTools = undefined;
+			}
+			return;
+		}
+		if (!baselineTools) baselineTools = pi.getActiveTools();
+		pi.setActiveTools(visibleTools(rules, baselineTools));
 	}
 
 	function switchTo(ctx: ExtensionContext, name: string): boolean {
@@ -128,8 +157,38 @@ export default function piMode(pi: ExtensionAPI): void {
 		},
 	});
 
+	pi.registerCommand("ask-preview", {
+		description: "Preview the pi-mode ask dialog (does not run anything)",
+		handler: async (args, ctx) => {
+			if (!ctx.hasUI) {
+				ctx.ui.notify("ask-preview needs a TUI", "warning");
+				return;
+			}
+			const which = args?.trim() === "write" ? "write" : "bash";
+			const verdict =
+				which === "write"
+					? {
+							action: "ask" as const,
+							surface: "write",
+							pattern: "**/*.md",
+							subject: "notes/TODO.md",
+							kind: "path" as const,
+					  }
+					: {
+							action: "ask" as const,
+							surface: "bash",
+							pattern: "git push *",
+							subject: PREVIEW_BASH_SUBJECT,
+							kind: "command" as const,
+					  };
+			const decision = await showAskDialog(ctx, verdict, config.ask);
+			ctx.ui.notify(`ask-preview: ${decision}`, "info");
+		},
+	});
+
 	// perTurn prompt: ephemeral system-prompt append, recomputed each turn.
 	pi.on("before_agent_start", async (event) => {
+		agentsMd = collectAgentsMd(event.systemPromptOptions?.contextFiles);
 		if (!currentMode) return;
 		const prompt = config.modes[currentMode]?.perTurnPrompt;
 		if (prompt) {
@@ -137,8 +196,96 @@ export default function piMode(pi: ExtensionAPI): void {
 		}
 	});
 
+	pi.on("tool_call", async (event, ctx) => {
+		if (!currentMode) return;
+		const rules = config.modes[currentMode]?.permission;
+		if (!rules) return;
+
+		const surface = event.toolName;
+		const subject = extractSubject(surface, event.input as Record<string, unknown>);
+		const kind = subjectKind(surface);
+		if (approvals.allows(surface, subject, kind, ctx.cwd)) return;
+
+		const verdict =
+			surface === "bash"
+				? evaluateBashCommand(
+						subject,
+						rules,
+						config.commandWrappers,
+						config.classifier.wholeCommandThreshold,
+						ctx.cwd,
+				  )
+				: evaluatePermission(rules, surface, subject, ctx.cwd);
+		let action = verdict.action;
+		if (action === "classify") {
+			action = await classifyVerdict(ctx, verdict.subject, verdict.classifyTargets ?? [verdict.subject]);
+		}
+		if (action === "allow") return;
+		if (action === "deny") {
+			return {
+				block: true,
+				reason: `pi-mode (${currentMode}): ${surface} denied: ${subject}`,
+			};
+		}
+		if (!ctx.hasUI) {
+			return {
+				block: true,
+				reason: `pi-mode (${currentMode}): ${surface} requires approval (no UI)`,
+			};
+		}
+		const decision = await showAskDialog(ctx, { ...verdict, action: "ask" }, config.ask);
+		if (decision === "allow_once") return;
+		if (decision === "allow_session") {
+			approvals.add(surface, verdict.pattern ?? "*");
+			return;
+		}
+		return {
+			block: true,
+			reason: `pi-mode (${currentMode}): ${surface} denied by user`,
+		};
+	});
+
 	// Restore (resume) or initialize (startup) the active mode.
+	async function classifyVerdict(ctx: ExtensionContext, wholeCommand: string, targets: string[]): Promise<Action> {
+		const ref = parseModelRef(config.classifier.model);
+		const model = ref ? ctx.modelRegistry.find(ref.provider, ref.modelId) : undefined;
+		return classifyCommands({
+			config: config.classifier,
+			wholeCommand,
+			targets,
+			agentsMd,
+			userMessages: lastUserTexts(ctx.sessionManager.getBranch()),
+			cache: classifyCache,
+			complete: async (call) => {
+				if (!model || !ctx.modelRegistry.hasConfiguredAuth(model)) {
+					throw new Error("classifier model unavailable");
+				}
+				const result = await ctx.modelRegistry.complete(
+					model,
+					{
+						systemPrompt: call.systemPrompt,
+						messages: [{ role: "user", content: call.userContent, timestamp: Date.now() }],
+					},
+					{
+						reasoningEffort: "low",
+						cacheRetention: "none",
+						sessionId: randomUUID(),
+						signal: ctx.signal,
+					},
+				);
+				if (result.errorMessage) throw new Error(result.errorMessage);
+				return result.content
+					.filter((part): part is { type: "text"; text: string } => part.type === "text")
+					.map((part) => part.text)
+					.join("");
+			},
+		});
+	}
+
 	pi.on("session_start", async (_event, ctx) => {
+		approvals.clear();
+		classifyCache.clear();
+		agentsMd = "";
 		const entries = ctx.sessionManager.getEntries();
 		const stateEntry = entries
 			.filter((e: { type: string; customType?: string }) => e.type === "custom" && e.customType === STATE_ENTRY)
@@ -149,7 +296,7 @@ export default function piMode(pi: ExtensionAPI): void {
 		const isValid = (n: unknown): n is string => typeof n === "string" && !!config.modes[n];
 
 		if (isValid(flagMode)) {
-			// Explicit --mode flag: fresh switch.
+			// Explicit --pi-mode flag: treat as a switch.
 			setMode(ctx, flagMode, { reason: "switch", announce: true, persist: true });
 		} else if (isValid(persisted)) {
 			// Resume: silently restore, no re-announce.

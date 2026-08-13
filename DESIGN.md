@@ -90,8 +90,10 @@ See `config/config.example.json` for the shipped defaults.
     globs (`"git push *"`, `"*"`, `"ls"`); for `write`/`edit`/`path`/file reads,
     patterns are **file-path globs** (`"**/*.md"`, `"*"`).
 
-> Path-glob matching semantics (whether `**/*.md` matches a top-level `foo.md`)
-> use minimatch; verified during Layer 2 implementation.
+> Path globs use minimatch (`dot`, `nocomment`). `**/*.md` matches a top-level
+> `foo.md` (globstar may be empty). The pattern `*` is special-cased as match-all
+> (minimatch's `*` does not cross `/`). Bash/tool patterns are command-prefix
+> globs where `*` matches any characters including spaces and slashes.
 
 ## 4. Architecture
 
@@ -113,7 +115,7 @@ Layers (each an independently runnable/verifiable slice):
 1. Mode lifecycle (prompt-only modes end-to-end).
 2. Permission gating + ask dialog.
 3. Bash pipeline (unbash cascade, allowlist).
-4. AI classifier.
+4. AI classifier (done).
 
 ## 5. Mode lifecycle
 
@@ -160,7 +162,8 @@ specific allow last under last-match-wins) = only markdown writable.
 
 Resolving a bash `tool_call`:
 1. `unbash.parse(wholeCommand)`.
-2. **unbash fails** → whole-command path (step 5), raw string.
+2. **unbash fails** → whole-command path (step 5), raw string; if that is not
+   already `deny`, fail-closed to `ask` (broken syntax must not silently allow).
 3. **unbash succeeds** → decompose into command units; recursively strip
    transparent wrappers (`commandWrappers`); evaluate each unit against the
    mode's `bash` rules → per-unit action.
@@ -209,19 +212,22 @@ Triggered only when a bash unit/surface resolves to `classify`.
 When `ask` is reached (any surface):
 - Non-interactive (`!ctx.hasUI`) → **deny** (fail-closed).
 - Custom TUI via `ctx.ui.custom((tui, theme, kb, done) => ({ render, invalidate, handleInput }))`.
-- Layout: header (surface + e.g. "bash"); **command codeblock** (border box,
-  max height `ask.maxBlockHeight` default 10; overflow → internal scroll with
-  `n/total ↑↓` indicator; collapsible); 3 options — Allow once / Allow for
-  session (records matched pattern) / Deny.
+- Layout: header (surface + e.g. "bash"); **command body** (no box border —
+  distinct bg/fg; max height `ask.maxBlockHeight` default 10; overflow →
+  internal scroll with `n/total` indicator; collapsible); 3 options — Allow
+  once / Allow for session (records matched pattern) / Deny. `↑`/`↓` move the
+  option highlight; `Enter` confirms the highlighted option.
 - **Keybinds** (fixed in `ask.ts` for v1; configurable is a follow-up):
 
   | Key | Action |
   |---|---|
-  | `Enter` · `y` | Allow once |
+  | `↑` `↓` | Move option highlight |
+  | `Enter` | Confirm highlighted option |
+  | `y` | Allow once |
   | `a` · `s` | Allow for session |
   | `Esc` · `n` | Deny |
-  | `Ctrl+]` | Collapse / expand codeblock |
-  | `↑` `↓` · `Ctrl+j` `Ctrl+k` | Scroll codeblock (expanded & overflowing) |
+  | `Ctrl+]` | Collapse / expand command body |
+  | `Ctrl+j` `Ctrl+k` | Scroll command body (expanded & overflowing) |
 
 - **Session approvals**: recorded as highest-priority rules (matched pattern →
   allow for the session). v1 records the exact matched pattern; smarter pattern
