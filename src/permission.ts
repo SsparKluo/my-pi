@@ -69,14 +69,20 @@ function matchCommand(subject: string, pattern: string): boolean {
 	return commandGlobToRegExp(pattern).test(subject);
 }
 
+const commandGlobCache = new Map<string, RegExp>();
+
 function commandGlobToRegExp(pattern: string): RegExp {
+	const hit = commandGlobCache.get(pattern);
+	if (hit) return hit;
 	let src = "";
 	for (const ch of pattern) {
 		if (ch === "*") src += ".*";
 		else if (ch === "?") src += ".";
 		else src += escapeRegex(ch);
 	}
-	return new RegExp(`^${src}$`);
+	const re = new RegExp(`^${src}$`);
+	commandGlobCache.set(pattern, re);
+	return re;
 }
 
 function escapeRegex(ch: string): string {
