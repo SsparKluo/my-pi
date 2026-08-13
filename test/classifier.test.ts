@@ -148,6 +148,24 @@ describe("classifyCommands", () => {
 		expect(action).toBe("deny");
 	});
 
+	it("classifies duplicate targets once in a single call", async () => {
+		let calls = 0;
+		const action = await classifyCommands({
+			config: cfg,
+			wholeCommand: "ls && ls",
+			targets: ["ls", "  ls  "],
+			agentsMd: "",
+			userMessages: [],
+			cache: new Map(),
+			complete: async () => {
+				calls += 1;
+				return "allow";
+			},
+		});
+		expect(action).toBe("allow");
+		expect(calls).toBe(1);
+	});
+
 	it("skips the cache when cache is disabled", async () => {
 		let calls = 0;
 		const complete = async () => {

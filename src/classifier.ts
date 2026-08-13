@@ -90,36 +90,40 @@ export async function classifyCommands(opts: {
 }): Promise<Action> {
 	const targets = opts.targets.length > 0 ? opts.targets : [opts.wholeCommand];
 	const systemPrompt = opts.config.prompt?.trim() || DEFAULT_CLASSIFIER_PROMPT;
-	const verdicts: Action[] = [];
-
+	const unique: { key: string; target: string }[] = [];
+	const seen = new Set<string>();
 	for (const target of targets) {
 		const key = normalizeCacheKey(target);
-		if (opts.config.cache) {
-			const hit = opts.cache.get(key);
-			if (hit) {
-				verdicts.push(hit);
-				continue;
-			}
-		}
-		let raw: string;
-		try {
-			raw = await opts.complete({
-				systemPrompt,
-				userContent: buildClassifierUserContent({
-					agentsMd: opts.agentsMd,
-					userMessages: opts.userMessages,
-					wholeCommand: opts.wholeCommand,
-					target,
-				}),
-			});
-		} catch {
-			verdicts.push(opts.config.fallback);
-			continue;
-		}
-		const verdict = parseClassifierVerdict(raw, opts.config.verdicts, opts.config.fallback);
-		if (opts.config.cache) opts.cache.set(key, verdict);
-		verdicts.push(verdict);
+		if (seen.has(key)) continue;
+		seen.add(key);
+		unique.push({ key, target });
 	}
+
+	const verdicts = await Promise.all(
+		unique.map(async ({ key, target }) => {
+			if (opts.config.cache) {
+				const hit = opts.cache.get(key);
+				if (hit) return hit;
+			}
+			let raw: string;
+			try {
+				raw = await opts.complete({
+					systemPrompt,
+					userContent: buildClassifierUserContent({
+						agentsMd: opts.agentsMd,
+						userMessages: opts.userMessages,
+						wholeCommand: opts.wholeCommand,
+						target,
+					}),
+				});
+			} catch {
+				return opts.config.fallback;
+			}
+			const verdict = parseClassifierVerdict(raw, opts.config.verdicts, opts.config.fallback);
+			if (opts.config.cache) opts.cache.set(key, verdict);
+			return verdict;
+		}),
+	);
 
 	return mergeClassifierVerdicts(verdicts, opts.config.fallback);
 }
