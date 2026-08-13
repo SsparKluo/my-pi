@@ -1,4 +1,4 @@
-import { basename, isAbsolute, relative } from "node:path";
+import { isAbsolute, normalize, relative } from "node:path";
 import { minimatch } from "minimatch";
 import type { Action, PermissionRules, SurfaceRule } from "./config.ts";
 
@@ -41,21 +41,27 @@ export function patternMatches(pattern: string, subject: string, kind: MatchKind
 
 /** Path globs via minimatch. `*` is match-all (see patternMatches). Nested markdown globs match top-level files too. */
 function matchPath(subject: string, pattern: string, cwd: string): boolean {
+	const candidates = pathCandidates(subject, cwd);
+	if (candidates.length === 0) return false;
 	if (pattern === "**") return true;
-	return pathCandidates(subject, cwd).some((candidate) => minimatch(candidate, pattern, MINIMATCH_OPTS));
+	return candidates.some((candidate) => minimatch(candidate, pattern, MINIMATCH_OPTS));
 }
 
+/** Cwd-relative forms only. Paths that escape the project produce no candidates (fail-closed). */
 function pathCandidates(subject: string, cwd: string): string[] {
 	const posix = subject.replace(/\\/g, "/");
-	const out = new Set<string>([posix]);
-	const base = basename(posix);
-	if (base) out.add(base);
-	if (cwd && isAbsolute(subject)) {
-		const rel = relative(cwd, subject).replace(/\\/g, "/");
-		if (rel && !rel.startsWith("..") && !isAbsolute(rel)) out.add(rel);
+	let rel: string;
+	if (isAbsolute(subject)) {
+		if (!cwd) return [];
+		rel = relative(cwd, subject).replace(/\\/g, "/");
+	} else {
+		const stripped = posix.startsWith("./") ? posix.slice(2) : posix;
+		rel = normalize(stripped).replace(/\\/g, "/");
 	}
-	if (posix.startsWith("./")) out.add(posix.slice(2));
-	return [...out];
+	if (!rel || rel === "." || rel === ".." || rel.startsWith("../") || isAbsolute(rel)) {
+		return [];
+	}
+	return [rel];
 }
 
 /** Command-prefix glob: `*` / `?` match any chars including spaces and slashes. */

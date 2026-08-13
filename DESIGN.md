@@ -92,8 +92,10 @@ See `config/config.example.json` for the shipped defaults.
 
 > Path globs use minimatch (`dot`, `nocomment`). `**/*.md` matches a top-level
 > `foo.md` (globstar may be empty). The pattern `*` is special-cased as match-all
-> (minimatch's `*` does not cross `/`). Bash/tool patterns are command-prefix
-> globs where `*` matches any characters including spaces and slashes.
+> (minimatch's `*` does not cross `/`). Subjects are resolved relative to cwd;
+> paths that escape the project (`..`, absolute outside cwd) match no specific
+> glob (fail-closed). Bash/tool patterns are command-prefix globs where `*`
+> matches any characters including spaces and slashes.
 
 ## 4. Architecture
 

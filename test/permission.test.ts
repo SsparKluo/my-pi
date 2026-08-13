@@ -30,9 +30,26 @@ describe("path globs", () => {
 		expect(patternMatches("**/*.md", `${cwd}/src/index.ts`, "path", cwd)).toBe(false);
 	});
 
-	it("matches ./prefixed and basename-only subjects", () => {
+	it("matches ./prefixed subjects against the stripped relative path", () => {
 		expect(patternMatches("**/*.md", "./README.md", "path", cwd)).toBe(true);
-		expect(patternMatches("*.md", "src/foo.md", "path", cwd)).toBe(true);
+		expect(patternMatches("*.md", "./README.md", "path", cwd)).toBe(true);
+	});
+
+	it("does not let * cross / (minimatch semantics, no basename fallback)", () => {
+		expect(patternMatches("*.md", "src/foo.md", "path", cwd)).toBe(false);
+		expect(patternMatches("*.md", "foo.md", "path", cwd)).toBe(true);
+	});
+
+	it("does not match paths that escape cwd", () => {
+		expect(patternMatches("**/*.md", "../secrets.md", "path", cwd)).toBe(false);
+		expect(patternMatches("**/*.md", "../../etc/passwd.md", "path", cwd)).toBe(false);
+		expect(patternMatches("**/*.md", "/etc/evil.md", "path", cwd)).toBe(false);
+		expect(patternMatches("**/*.md", `${cwd}/../outside.md`, "path", cwd)).toBe(false);
+	});
+
+	it("still matches in-project paths after collapsing . and ..", () => {
+		expect(patternMatches("**/*.md", "docs/../README.md", "path", cwd)).toBe(true);
+		expect(patternMatches("*.md", "docs/../README.md", "path", cwd)).toBe(true);
 	});
 });
 
@@ -60,6 +77,13 @@ describe("evaluatePermission", () => {
 		expect(evaluatePermission(plan, "write", "src/index.ts", cwd).action).toBe("deny");
 		expect(evaluatePermission(plan, "edit", `${cwd}/notes.md`, cwd).action).toBe("allow");
 		expect(evaluatePermission(plan, "edit", `${cwd}/src/index.ts`, cwd).action).toBe("deny");
+	});
+
+	it("denies plan writes that escape the project, even if the basename is .md", () => {
+		expect(evaluatePermission(plan, "write", "../secrets.md", cwd).action).toBe("deny");
+		expect(evaluatePermission(plan, "write", "/etc/evil.md", cwd).action).toBe("deny");
+		expect(evaluatePermission(plan, "write", "../../etc/passwd.md", cwd).action).toBe("deny");
+		expect(evaluatePermission(plan, "edit", `${cwd}/../outside.md`, cwd).action).toBe("deny");
 	});
 
 	it("allows plan's read-only bash allowlist and denies the rest", () => {
