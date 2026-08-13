@@ -30,7 +30,6 @@ export default function piMode(pi: ExtensionAPI): void {
 	const config: PiModeConfig = loadConfig();
 
 	let currentMode: string | undefined;
-	let baselineTools: string[] | undefined;
 	const approvals = new SessionApprovals();
 	const classifyCache = new Map<string, Action>();
 	let agentsMd = "";
@@ -89,16 +88,8 @@ export default function piMode(pi: ExtensionAPI): void {
 	}
 
 	function applyToolsForMode(name: string): void {
-		const rules = config.modes[name]?.permission;
-		if (!rules) {
-			if (baselineTools) {
-				pi.setActiveTools(baselineTools);
-				baselineTools = undefined;
-			}
-			return;
-		}
-		if (!baselineTools) baselineTools = pi.getActiveTools();
-		pi.setActiveTools(visibleTools(rules, baselineTools));
+		const catalog = pi.getAllTools().map((t) => t.name);
+		pi.setActiveTools(visibleTools(config.modes[name]?.permission, catalog));
 	}
 
 	function switchTo(ctx: ExtensionContext, name: string): boolean {
@@ -186,10 +177,11 @@ export default function piMode(pi: ExtensionAPI): void {
 		},
 	});
 
-	// perTurn prompt: ephemeral system-prompt append, recomputed each turn.
+	// Hide globally-denied tools + append perTurn prompt (both recomputed each turn).
 	pi.on("before_agent_start", async (event) => {
 		agentsMd = collectAgentsMd(event.systemPromptOptions?.contextFiles);
 		if (!currentMode) return;
+		applyToolsForMode(currentMode);
 		const prompt = config.modes[currentMode]?.perTurnPrompt;
 		if (prompt) {
 			return { systemPrompt: `${event.systemPrompt}\n\n${prompt}` };
