@@ -101,15 +101,12 @@ See `config/config.example.json` for the shipped defaults.
 
 ```
 src/
-  index.ts        # factory; wires everything; session_start restore; before_agent_start prompts/tools
+  index.ts        # factory; mode state machine; /mode + --pi-mode; prompts; tool hide + tool_call gate
   config.ts       # types + load ~/.pi/pi-mode/config.json + defaults + validation
-  modes.ts        # state machine: current mode, switch, persist, restore, broadcast, status line
-  prompts.ts      # onEnter/onExit (sendMessage) + perTurn (systemPrompt append)
-  permission.ts   # flat-format evaluation + path-glob + before_agent_start tool-hide + tool_call gate
+  permission.ts   # flat-format evaluation + path-glob + tool-hide helper + session approvals
   bash.ts         # unbash cascade: parse → wrapper-strip → unit eval → classifier dispatch
   classifier.ts   # modelRegistry.complete call, context assembly, cache, fallback
-  ask.ts          # custom TUI dialog (ctx.ui.custom) + session-approval store
-  commands.ts     # /mode command + selector, cycle shortcut, --pi-mode flag
+  ask.ts          # custom TUI dialog (ctx.ui.custom)
 ```
 
 Layers (each an independently runnable/verifiable slice):

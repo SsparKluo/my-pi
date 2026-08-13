@@ -20,10 +20,7 @@ interface CommandUnit {
 	hiding: boolean;
 }
 
-/**
- * Bash cascade (Layer 3). `classify` is returned as-is; the tool_call gate
- * still maps it to `ask` until Layer 4.
- */
+/** Bash cascade: unbash units → last-match-wins → deny/ask short-circuit → classify targets. */
 export function evaluateBashCommand(
 	command: string,
 	rules: PermissionRules | undefined,
