@@ -115,18 +115,61 @@ export const DEFAULT_CONFIG: PiModeConfig = {
 	ask: { maxBlockHeight: 10 },
 };
 
-/** Merge a user-parsed config over defaults (forgiving: fills missing top-level fields). */
-function mergeConfig(parsed: unknown): PiModeConfig {
+const ACTIONS = new Set<Action>(["allow", "deny", "ask", "classify"]);
+
+function asAction(value: unknown, fallback: Action = "deny"): Action {
+	return typeof value === "string" && ACTIONS.has(value as Action) ? (value as Action) : fallback;
+}
+
+function sanitizeSurfaceRule(rule: SurfaceRule): SurfaceRule {
+	if (typeof rule === "string") return asAction(rule);
+	const out: Record<string, Action> = {};
+	for (const [pattern, action] of Object.entries(rule)) {
+		out[pattern] = asAction(action);
+	}
+	return out;
+}
+
+function sanitizeModes(modes: Record<string, ModeConfig>): Record<string, ModeConfig> {
+	const out: Record<string, ModeConfig> = {};
+	for (const [name, mode] of Object.entries(modes)) {
+		const permission = mode?.permission;
+		out[name] = {
+			...mode,
+			permission: permission
+				? Object.fromEntries(
+						Object.entries(permission).map(([surface, rule]) => [surface, sanitizeSurfaceRule(rule)]),
+					)
+				: permission,
+		};
+	}
+	return out;
+}
+
+function sanitizeVerdicts(raw: unknown): string[] {
+	if (!Array.isArray(raw)) return DEFAULT_CONFIG.classifier.verdicts;
+	const kept = raw.filter((v): v is string => typeof v === "string" && ACTIONS.has(v as Action));
+	return kept.length > 0 ? kept : DEFAULT_CONFIG.classifier.verdicts;
+}
+
+/** Merge a user-parsed config over defaults and coerce unknown actions to deny. */
+export function parseConfig(parsed: unknown): PiModeConfig {
 	const p = (parsed ?? {}) as Partial<PiModeConfig>;
 	const modes =
 		p.modes && typeof p.modes === "object"
 			? (p.modes as Record<string, ModeConfig>)
 			: DEFAULT_CONFIG.modes;
+	const classifierIn = (p.classifier ?? {}) as Partial<ClassifierConfig>;
 	return {
 		defaultMode: typeof p.defaultMode === "string" ? p.defaultMode : DEFAULT_CONFIG.defaultMode,
 		commandWrappers: Array.isArray(p.commandWrappers) ? p.commandWrappers : DEFAULT_CONFIG.commandWrappers,
-		modes: structuredClone(modes),
-		classifier: { ...DEFAULT_CONFIG.classifier, ...(p.classifier ?? {}) },
+		modes: sanitizeModes(structuredClone(modes)),
+		classifier: {
+			...DEFAULT_CONFIG.classifier,
+			...classifierIn,
+			fallback: asAction(classifierIn.fallback ?? DEFAULT_CONFIG.classifier.fallback),
+			verdicts: sanitizeVerdicts(classifierIn.verdicts ?? DEFAULT_CONFIG.classifier.verdicts),
+		},
 		ask: { ...DEFAULT_CONFIG.ask, ...(p.ask ?? {}) },
 	};
 }
@@ -136,7 +179,7 @@ export function loadConfig(): PiModeConfig {
 	const path = getConfigPath();
 	if (!existsSync(path)) return structuredClone(DEFAULT_CONFIG);
 	try {
-		return mergeConfig(JSON.parse(readFileSync(path, "utf-8")));
+		return parseConfig(JSON.parse(readFileSync(path, "utf-8")));
 	} catch (err) {
 		console.error(`[pi-mode] Failed to load ${path}: ${err}. Using defaults.`);
 		return structuredClone(DEFAULT_CONFIG);
