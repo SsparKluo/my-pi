@@ -1,4 +1,5 @@
-import { isAbsolute, normalize, relative } from "node:path";
+import { homedir } from "node:os";
+import { isAbsolute, join, normalize, relative } from "node:path";
 import { minimatch } from "minimatch";
 import type { Action, PermissionRules, SurfaceRule } from "./config.ts";
 
@@ -17,6 +18,8 @@ export interface PermissionVerdict {
 	kind: MatchKind;
 	/** Set when action is classify: units to send, or the whole command. */
 	classifyTargets?: string[];
+	/** Bash units that resolved to ask — what the dialog shows and session-caches. */
+	askUnits?: string[];
 }
 
 export function subjectKind(surface: string): MatchKind {
@@ -41,10 +44,31 @@ export function patternMatches(pattern: string, subject: string, kind: MatchKind
 
 /** Path globs via minimatch. `*` is match-all (see patternMatches). Nested markdown globs match top-level files too. */
 function matchPath(subject: string, pattern: string, cwd: string): boolean {
+	if (pattern === "**") return true;
+	const expanded = expandHome(pattern);
+	if (isAbsolute(expanded)) {
+		return minimatch(resolveAbs(subject, cwd), expanded.replace(/\\/g, "/"), MINIMATCH_OPTS);
+	}
 	const candidates = pathCandidates(subject, cwd);
 	if (candidates.length === 0) return false;
-	if (pattern === "**") return true;
 	return candidates.some((candidate) => minimatch(candidate, pattern, MINIMATCH_OPTS));
+}
+
+function expandHome(pathish: string): string {
+	const posix = pathish.replace(/\\/g, "/");
+	if (posix === "~" || posix.startsWith("~/")) {
+		return join(homedir(), posix.slice(1)).replace(/\\/g, "/");
+	}
+	return posix;
+}
+
+function resolveAbs(subject: string, cwd: string): string {
+	const posix = subject.replace(/\\/g, "/").trim();
+	if (posix === "~" || posix.startsWith("~/")) {
+		return join(homedir(), posix.slice(1)).replace(/\\/g, "/");
+	}
+	if (isAbsolute(subject)) return normalize(subject).replace(/\\/g, "/");
+	return normalize(join(cwd || ".", posix)).replace(/\\/g, "/");
 }
 
 /** Cwd-relative forms only. Paths that escape the project produce no candidates (fail-closed). */
@@ -168,6 +192,65 @@ export function reconcileTools(
 	const next = visibleTools(rules, candidate);
 	const nextSet = new Set(next);
 	return { active: next, hidden: candidate.filter((name) => !nextSet.has(name)) };
+}
+
+export interface SessionApprovalTarget {
+	display: string;
+	external: boolean;
+}
+
+export interface SessionApprovalHint {
+	/** Tool / surface name (read, bash, …). */
+	tool: string;
+	/** Every visible target path, or the raw command when bash has no path args. */
+	targets: SessionApprovalTarget[];
+}
+
+/** Label bits for the ask-dialog "Allow for session" row. */
+export function sessionApprovalHint(verdict: PermissionVerdict, cwd: string): SessionApprovalHint {
+	const tool = verdict.surface;
+	if (verdict.kind === "path") {
+		return { tool, targets: [describePath(verdict.subject, cwd)] };
+	}
+	if (verdict.kind === "command") {
+		const units = verdict.askUnits && verdict.askUnits.length > 0 ? verdict.askUnits : [verdict.subject];
+		return {
+			tool,
+			targets: units.map((unit) => {
+				const paths = extractCommandPaths(unit).map((p) => describePath(p, cwd));
+				return { display: unit, external: paths.some((p) => p.external) };
+			}),
+		};
+	}
+	return { tool, targets: [] };
+}
+
+/** Resolve a path subject relative to cwd; mark anything that escapes the project as external. */
+export function describePath(subject: string, cwd: string): { display: string; external: boolean } {
+	const posix = subject.replace(/\\/g, "/").trim();
+	if (!posix) return { display: subject, external: false };
+	if (posix === "~" || posix.startsWith("~/")) {
+		return { display: posix, external: true };
+	}
+	const abs = isAbsolute(subject) ? normalize(subject) : normalize(join(cwd || ".", posix));
+	const absPosix = abs.replace(/\\/g, "/");
+	if (!cwd) return { display: absPosix, external: true };
+	const rel = relative(cwd, abs).replace(/\\/g, "/");
+	const external = !rel || rel === ".." || rel.startsWith("../") || isAbsolute(rel);
+	return { display: external ? absPosix : rel, external };
+}
+
+function extractCommandPaths(command: string): string[] {
+	const tokens = command.split(/[\s;|&<>()]+/).filter(Boolean);
+	return tokens.slice(1).filter(looksLikePath);
+}
+
+function looksLikePath(token: string): boolean {
+	if (token.startsWith("-")) return false;
+	if (token === "~" || token.startsWith("~/") || token.startsWith("/") || token.startsWith("./") || token.startsWith("../")) {
+		return true;
+	}
+	return token.includes("/");
 }
 
 export class SessionApprovals {

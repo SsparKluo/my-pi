@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { evaluateBashCommand } from "../src/bash.ts";
 import { DEFAULT_CONFIG } from "../src/config.ts";
+import { PLAN_PERMISSION } from "./plan-permission.ts";
 
 const cwd = "/home/louis/proj";
-const plan = DEFAULT_CONFIG.modes.plan?.permission;
+const plan = PLAN_PERMISSION;
 const wrappers = DEFAULT_CONFIG.commandWrappers;
 const threshold = DEFAULT_CONFIG.classifier.wholeCommandThreshold;
 
@@ -48,6 +49,15 @@ describe("plan allowlist via unbash units", () => {
 		const asked = ev("sudo ls", { bash: "allow" });
 		expect(asked.action).toBe("ask");
 		expect(asked.subject).toBe("sudo ls");
+		expect(asked.askUnits).toEqual(["sudo ls"]);
+	});
+
+	it("lists every unbash unit that resolved to ask", () => {
+		const rules = { bash: { "*": "ask" as const, ls: "allow" as const, "ls *": "allow" as const } };
+		const asked = ev("ls && git push origin && sudo cat /etc/hosts", rules);
+		expect(asked.action).toBe("ask");
+		expect(asked.subject).toBe("ls && git push origin && sudo cat /etc/hosts");
+		expect(asked.askUnits).toEqual(["git push origin", "sudo cat /etc/hosts"]);
 	});
 });
 

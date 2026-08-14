@@ -10,17 +10,14 @@ A pi coding-agent extension implementing a **mode-switcher**. A *mode* bundles a
 permission policy, prompts injected on enter/exit/per-turn, and (optionally) an
 AI bash classifier.
 
-- Ship three default modes — **plan**, **normal**, **auto** — but modes are
-  **config-defined** (arbitrary set, not a hardcoded enum).
-  - **plan**: read + a read-only bash allowlist; **writes/edits restricted to
-    `*.md`** (no code modification). Enter/exit prompts.
-  - **normal**: default pi behavior (no gating, optional prompt).
-  - **auto**: loose permission; **bash auto-approved by an AI safety classifier**
-    instead of user checking.
+- Modes are **config-defined** (arbitrary set, not a hardcoded enum).
+  Ship a single **`default`** mode with no `permission` block — identical to
+  vanilla pi. Commented `plan` / `auto` examples live in the JSONC template
+  for copy-paste (read-only `*.md` writes + bash allowlist; bash classifier).
 - **Everything configurable**: permission rules, prompts, classifier model,
   command wrappers, thresholds.
-- Config dir: **`~/.pi/pi-mode/`** (`config.json`; example shipped at
-  `config/config.example.json`).
+- Config file: **`~/.pi/agent/pi-mode-config.jsonc`** (JSONC, inside the agent
+  dir; respects `PI_AGENT_DIR`). Missing → write `config/config.example.jsonc`.
 - **Mode state persists per session** and is restored on resume (so exit/enter
   prompts re-inject correctly and the mode survives restarts).
 - **Notify other components on mode change** (and at startup) so UI components
@@ -36,7 +33,7 @@ AI bash classifier.
 
 | Ref | Decision |
 |---|---|
-| Q1 | Config-defined arbitrary modes; plan/normal/auto as defaults. |
+| Q1 | Config-defined arbitrary modes; shipped default is `default` (no gating). plan/auto are template comments. |
 | Q2 | Standalone; flat permission format (`allow`/`deny`/`ask`/`classify`, last-match-wins). |
 | Q3 | `permission` block optional (omit → prompt-only). `classify` is a first-class action. Global `commandWrappers`. |
 | Q4 | Three optional prompt fields emitted as their own block at send time (never the system prompt — that would bust the KV-cache prefix): `onEnterPrompt`/`onExitPrompt` on a mode change (displayed as a compact label), `perTurnPrompt` while staying in a mode (invisible, model-only). State persisted via session entry. |
@@ -50,11 +47,11 @@ AI bash classifier.
 
 ## 3. Configuration schema
 
-See `config/config.example.json` for the shipped defaults.
+See `config/config.example.jsonc` for the shipped (commented) template.
 
 ```jsonc
 {
-  "defaultMode": "normal",                              // startup mode if no flag/persisted state
+  "defaultMode": "default",                             // startup mode if no flag/persisted state
   "commandWrappers": ["rtk","time","nice","command"],   // transparent prefixes stripped before eval
   "modes": {
     "<modeName>": {
@@ -102,7 +99,9 @@ See `config/config.example.json` for the shipped defaults.
 ```
 src/
   index.ts        # factory; mode state machine; /mode + --pi-mode; prompts; tool hide + tool_call gate
-  config.ts       # types + load ~/.pi/pi-mode/config.json + defaults + validation
+  herdr.ts        # herdr agents-panel label + herdr:blocked around the ask dialog
+  config.ts       # types + load ~/.pi/agent/pi-mode-config.jsonc + defaults + validation
+  jsonc.ts        # comment / trailing-comma strip
   permission.ts   # flat-format evaluation + path-glob + tool-hide helper + session approvals
   bash.ts         # unbash cascade: parse → wrapper-strip → unit eval → classifier dispatch
   classifier.ts   # modelRegistry.complete call, context assembly, cache, fallback
@@ -121,7 +120,7 @@ Layers (each an independently runnable/verifiable slice):
 **State.** Current mode stored as a **session entry**
 `pi.appendEntry("pi-mode-state", { mode, ts })`. Restored on `session_start`
 (reason `startup`/`resume`/`reload`) via `ctx.sessionManager.getEntries()`; falls
-back to `defaultMode` then `normal`.
+back to `defaultMode` then `default`.
 
 **Switching** (`--pi-mode <name>` flag, `/mode` selector, `/mode <name>`, cycle shortcut)
 only changes mode state — it emits no prompt. The mode's prompt attaches to the
@@ -232,7 +231,7 @@ When `ask` is reached (any surface):
 - Layout: header (surface + e.g. "bash"); **command body** (no box border —
   distinct bg/fg; max height `ask.maxBlockHeight` default 10; overflow →
   internal scroll with `n/total` indicator; collapsible); 3 options — Allow
-  once / Allow for session (records matched pattern) / Deny. `↑`/`↓` move the
+  once / Allow for session (shows tool + targets; bash lists the unbash ask units and caches those unit texts; file calls show paths and still cache the matched pattern; marks `external` when a path leaves cwd) / Deny. `↑`/`↓` move the
   option highlight; `Enter` confirms the highlighted option.
 - **Keybinds** (fixed in `ask.ts` for v1; configurable is a follow-up):
 

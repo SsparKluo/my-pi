@@ -191,7 +191,7 @@ export function computeTurnStats(
 
 export interface HeaderRenderData {
     gitStatus: GitStatus | null;
-    /** Active pi-mode label (e.g. "⏸ plan"), already styled. Omitted in normal mode. */
+    /** Active pi-mode label (e.g. "⏸ plan"), already styled. Omitted in default mode. */
     piModeStatus?: string;
 }
 

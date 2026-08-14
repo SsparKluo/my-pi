@@ -32,7 +32,7 @@ export function evaluateBashCommand(
 	if (!parsed) {
 		const fallback = wholeCommand(command, rules, cwd);
 		if (fallback.action === "deny") return fallback;
-		return { ...fallback, action: "ask" };
+		return { ...fallback, action: "ask", askUnits: [command] };
 	}
 
 	const units = collectUnits(parsed, command, new Set(wrappers));
@@ -44,9 +44,13 @@ export function evaluateBashCommand(
 		return { ...denied, subject: command };
 	}
 
-	const asked = verdicts.find((v) => v.action === "ask");
-	if (asked) {
-		return { ...asked, subject: command };
+	const asked = verdicts.filter((v) => v.action === "ask");
+	if (asked.length > 0) {
+		return {
+			...asked[0],
+			subject: command,
+			askUnits: asked.map((v) => v.subject),
+		};
 	}
 
 	const classify = verdicts.filter((v) => v.action === "classify");

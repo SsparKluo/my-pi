@@ -10,6 +10,7 @@ import {
 	parseModelRef,
 } from "./classifier.ts";
 import { getConfigPath, loadConfig, type Action, type PiModeConfig } from "./config.ts";
+import { reportHerdrMode, setHerdrBlocked } from "./herdr.ts";
 import {
 	evaluatePermission,
 	extractSubject,
@@ -44,7 +45,7 @@ export default function piMode(pi: ExtensionAPI): void {
 	});
 
 	function statusText(): string | undefined {
-		if (!currentMode || currentMode === "normal") return undefined;
+		if (!currentMode || currentMode === "default") return undefined;
 		const icon = currentMode === "plan" ? "⏸" : currentMode === "auto" ? "⚡" : "●";
 		return `${icon} ${currentMode}`;
 	}
@@ -75,6 +76,7 @@ export default function piMode(pi: ExtensionAPI): void {
 		pi.events.emit(EVENT_CHANGED, { mode: name, previous, reason: opts.reason });
 		applyToolsForMode(name);
 		setStatus(ctx);
+		reportHerdrMode(name);
 	}
 
 	function applyToolsForMode(name: string): void {
@@ -174,7 +176,7 @@ export default function piMode(pi: ExtensionAPI): void {
 	pi.registerMessageRenderer("pi-mode-prompt", (message, _opts, theme) => {
 		const d = message.details as { from?: string; to?: string } | undefined;
 		const to = d?.to;
-		const label = to === "normal"
+		const label = to === "default"
 			? `${modeIcon(d?.from)} left ${d?.from ?? "mode"}`
 			: `${modeIcon(to)} entered ${to ?? "mode"}`;
 		return new Text(theme.fg("muted", label), 0, 0);
@@ -218,9 +220,9 @@ export default function piMode(pi: ExtensionAPI): void {
 		const surface = event.toolName;
 		const subject = extractSubject(surface, event.input as Record<string, unknown>);
 		const kind = subjectKind(surface);
-		if (approvals.allows(surface, subject, kind, ctx.cwd)) return;
+		if (kind !== "command" && approvals.allows(surface, subject, kind, ctx.cwd)) return;
 
-		const verdict =
+		let verdict =
 			surface === "bash"
 				? evaluateBashCommand(
 						subject,
@@ -241,16 +243,35 @@ export default function piMode(pi: ExtensionAPI): void {
 				reason: `pi-mode (${currentMode}): ${surface} denied: ${subject}`,
 			};
 		}
+		if (kind === "command") {
+			const units = verdict.askUnits ?? [subject];
+			const pending = units.filter((unit) => !approvals.allows("bash", unit, "command", ctx.cwd));
+			if (pending.length === 0) return;
+			verdict = { ...verdict, askUnits: pending };
+		}
 		if (!ctx.hasUI) {
 			return {
 				block: true,
 				reason: `pi-mode (${currentMode}): ${surface} requires approval (no UI)`,
 			};
 		}
-		const decision = await showAskDialog(ctx, { ...verdict, action: "ask" }, config.ask);
+		const askLabel = verdict.askUnits?.length
+			? `ask · ${verdict.askUnits.join(" · ")}`
+			: `ask · ${surface}`;
+		setHerdrBlocked(pi, true, askLabel);
+		let decision: "allow_once" | "allow_session" | "deny";
+		try {
+			decision = await showAskDialog(ctx, { ...verdict, action: "ask" }, config.ask);
+		} finally {
+			setHerdrBlocked(pi, false);
+		}
 		if (decision === "allow_once") return;
 		if (decision === "allow_session") {
-			approvals.add(surface, verdict.pattern ?? "*");
+			if (verdict.askUnits && verdict.askUnits.length > 0) {
+				for (const unit of verdict.askUnits) approvals.add("bash", unit);
+			} else {
+				approvals.add(surface, verdict.pattern ?? "*");
+			}
 			return;
 		}
 		return {
@@ -318,7 +339,7 @@ export default function piMode(pi: ExtensionAPI): void {
 			lastSentMode = persisted;
 		} else {
 			// First start: enter the configured default.
-			const def = config.modes[config.defaultMode] ? config.defaultMode : "normal";
+			const def = config.modes[config.defaultMode] ? config.defaultMode : "default";
 			setMode(ctx, def, { reason: "startup", persist: true });
 		}
 	});

@@ -1,7 +1,7 @@
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { AskConfig } from "./config.ts";
-import type { PermissionVerdict } from "./permission.ts";
+import { sessionApprovalHint, type PermissionVerdict } from "./permission.ts";
 
 export type AskDecision = "allow_once" | "allow_session" | "deny";
 
@@ -142,21 +142,23 @@ export async function showAskDialog(
 
 			lines.push("");
 
+			const hint = sessionApprovalHint(verdict, ctx.cwd);
+			const fitted = fitHint(hint, Math.max(16, contentW - 36));
+
 			for (let i = 0; i < OPTIONS.length; i++) {
 				const opt = OPTIONS[i];
 				const selected = i === state.selected;
 				const marker = selected ? "→ " : "  ";
-				const pattern =
-					opt.id === "allow_session" && verdict.pattern ? truncateToWidth(verdict.pattern, Math.max(8, contentW - 36), "…") : "";
-				const leftPlain = marker + opt.label + (pattern ? `  ${pattern}` : "");
+				const showCache = opt.id === "allow_session" && fitted.plain.length > 0;
+				const leftPlain = marker + opt.label + (showCache ? `  ${fitted.plain}` : "");
 				if (selected) {
 					const inner = spread(leftPlain, opt.hint, contentW - 2);
 					lines.push(indent(fill(theme, "selectedBg", theme.fg("accent", ` ${inner}`), contentW)));
 				} else {
 					const label = theme.fg("text", marker + opt.label);
-					const pat = pattern ? theme.fg("muted", `  ${pattern}`) : "";
+					const cache = showCache ? `  ${fitted.styled(theme)}` : "";
 					const gap = spreadGap(leftPlain, opt.hint, contentW - 2);
-					push(pad(` ${label}${pat}${" ".repeat(gap)}${theme.fg("dim", opt.hint)}`, contentW));
+					push(pad(` ${label}${cache}${" ".repeat(gap)}${theme.fg("dim", opt.hint)}`, contentW));
 				}
 			}
 
@@ -175,6 +177,32 @@ export async function showAskDialog(
 			handleInput,
 		};
 	});
+}
+
+function fitHint(
+	hint: ReturnType<typeof sessionApprovalHint>,
+	budget: number,
+): { plain: string; styled: (theme: Theme) => string } {
+	const per = Math.max(8, Math.floor(budget / Math.max(2, hint.targets.length + 1)));
+	const tool = truncateToWidth(hint.tool, per, "…");
+	const targets = hint.targets.map((t) => ({
+		...t,
+		display: truncateToWidth(t.display, per, "…"),
+	}));
+	const anyExternal = targets.some((t) => t.external);
+	const bits = [tool, ...targets.map((t) => t.display), ...(anyExternal ? ["external"] : [])];
+	const plain = bits.filter(Boolean).join("  ·  ");
+	return {
+		plain,
+		styled: (theme) => {
+			const parts = [theme.fg("muted", tool)];
+			for (const t of targets) {
+				parts.push(theme.fg(t.external ? "warning" : "muted", t.display));
+			}
+			if (anyExternal) parts.push(theme.fg("warning", "external"));
+			return parts.join(theme.fg("dim", "  ·  "));
+		},
+	};
 }
 
 function indent(text: string): string {

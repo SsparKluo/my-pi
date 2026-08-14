@@ -1,6 +1,8 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { parseJsonc } from "./jsonc.ts";
 
 /** A permission action. `classify` routes bash to the AI classifier. */
 export type Action = "allow" | "deny" | "ask" | "classify";
@@ -40,69 +42,27 @@ export interface PiModeConfig {
 	ask: AskConfig;
 }
 
-/** `~/.pi/pi-mode` — sibling of pi's agent dir (respects PI_AGENT_DIR override). */
-export function getConfigDir(): string {
-	return join(dirname(getAgentDir()), "pi-mode");
-}
+const DEFAULT_MODE = "default";
 
+/** `~/.pi/agent/pi-mode-config.jsonc` (respects PI_AGENT_DIR override). */
 export function getConfigPath(): string {
-	return join(getConfigDir(), "config.json");
+	return join(getAgentDir(), "pi-mode-config.jsonc");
 }
 
-/** Built-in defaults; mirror config/config.example.json. Used when no user config exists. */
+/** Shipped commented template, copied to the agent dir when the user file is missing. */
+export function getExampleConfigPath(): string {
+	return join(dirname(fileURLToPath(import.meta.url)), "../config/config.example.jsonc");
+}
+
+/**
+ * Built-in defaults when the file is absent or unreadable.
+ * Only `default` — no permission block — so behavior matches vanilla pi.
+ */
 export const DEFAULT_CONFIG: PiModeConfig = {
-	defaultMode: "normal",
+	defaultMode: DEFAULT_MODE,
 	commandWrappers: ["rtk", "time", "nice", "command"],
 	modes: {
-		normal: {
-			onEnterPrompt: null,
-			onExitPrompt: null,
-			perTurnPrompt: null,
-		},
-		plan: {
-			onEnterPrompt:
-				"You are now in PLAN MODE (read-only). Investigate and produce a plan. You may only edit *.md files; do not modify code.",
-			onExitPrompt: "PLAN MODE ended. Full permissions restored.",
-			perTurnPrompt:
-				"Current mode: plan — read-only; *.md writes only; bash restricted to a read-only allowlist.",
-			permission: {
-				"*": "ask",
-				read: "allow",
-				grep: "allow",
-				find: "allow",
-				ls: "allow",
-				write: { "*": "deny", "**/*.md": "allow" },
-				edit: { "*": "deny", "**/*.md": "allow" },
-				bash: {
-					"*": "deny",
-					ls: "allow",
-					"ls *": "allow",
-					"cat *": "allow",
-					"head *": "allow",
-					"tail *": "allow",
-					"grep *": "allow",
-					"rg *": "allow",
-					"find *": "allow",
-					"fd *": "allow",
-					"git status": "allow",
-					"git diff *": "allow",
-					"git log *": "allow",
-					"git branch": "allow",
-					"git show *": "allow",
-					pwd: "allow",
-					"tree *": "allow",
-					"wc *": "allow",
-				},
-			},
-		},
-		auto: {
-			onEnterPrompt:
-				"You are in AUTO MODE. Bash commands are auto-approved by a safety classifier; file access is unrestricted.",
-			onExitPrompt: "AUTO MODE ended.",
-			perTurnPrompt:
-				"Current mode: auto — bash auto-approved by a safety classifier; file access unrestricted.",
-			permission: { "*": "allow", bash: "classify" },
-		},
+		[DEFAULT_MODE]: {},
 	},
 	classifier: {
 		model: "anthropic/claude-haiku-4-5",
@@ -114,6 +74,14 @@ export const DEFAULT_CONFIG: PiModeConfig = {
 	},
 	ask: { maxBlockHeight: 10 },
 };
+
+const MINIMAL_TEMPLATE = `{
+  "defaultMode": "default",
+  "modes": {
+    "default": {}
+  }
+}
+`;
 
 const ACTIONS = new Set<Action>(["allow", "deny", "ask", "classify"]);
 
@@ -155,9 +123,10 @@ function sanitizeVerdicts(raw: unknown): string[] {
 /** Merge a user-parsed config over defaults and coerce unknown actions to deny. */
 export function parseConfig(parsed: unknown): PiModeConfig {
 	const p = (parsed ?? {}) as Partial<PiModeConfig>;
+	const rawModes = p.modes;
 	const modes =
-		p.modes && typeof p.modes === "object"
-			? (p.modes as Record<string, ModeConfig>)
+		rawModes && typeof rawModes === "object" && !Array.isArray(rawModes) && Object.keys(rawModes).length > 0
+			? (rawModes as Record<string, ModeConfig>)
 			: DEFAULT_CONFIG.modes;
 	const classifierIn = (p.classifier ?? {}) as Partial<ClassifierConfig>;
 	return {
@@ -174,14 +143,54 @@ export function parseConfig(parsed: unknown): PiModeConfig {
 	};
 }
 
-/** Load `~/.pi/pi-mode/config.json`, falling back to defaults on absence or error. */
-export function loadConfig(): PiModeConfig {
-	const path = getConfigPath();
-	if (!existsSync(path)) return structuredClone(DEFAULT_CONFIG);
+function templateBody(): string {
+	const example = getExampleConfigPath();
+	if (existsSync(example)) return readFileSync(example, "utf-8");
+	return MINIMAL_TEMPLATE;
+}
+
+/** Write the commented template. Returns false if the write failed. */
+export function writeDefaultConfigFile(configPath: string): boolean {
 	try {
-		return parseConfig(JSON.parse(readFileSync(path, "utf-8")));
+		mkdirSync(dirname(configPath), { recursive: true });
+		writeFileSync(configPath, templateBody(), "utf-8");
+		return true;
 	} catch (err) {
-		console.error(`[pi-mode] Failed to load ${path}: ${err}. Using defaults.`);
-		return structuredClone(DEFAULT_CONFIG);
+		console.error(`[pi-mode] Failed to create ${configPath}: ${err}`);
+		return false;
 	}
+}
+
+export interface LoadConfigResult {
+	config: PiModeConfig;
+	path: string;
+	/** True when the file did not exist and a template was written (or write failed). */
+	created: boolean;
+	error?: string;
+}
+
+/** Load and validate a pi-mode config at an explicit path. Missing → write template. */
+export function loadConfigFromFile(configPath: string): LoadConfigResult {
+	let created = false;
+	if (!existsSync(configPath)) {
+		writeDefaultConfigFile(configPath);
+		created = true;
+	}
+
+	if (!existsSync(configPath)) {
+		return { config: structuredClone(DEFAULT_CONFIG), path: configPath, created, error: "missing" };
+	}
+
+	try {
+		return { config: parseConfig(parseJsonc(readFileSync(configPath, "utf-8"))), path: configPath, created };
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		console.error(`[pi-mode] Failed to load ${configPath}: ${err}. Using defaults.`);
+		return { config: structuredClone(DEFAULT_CONFIG), path: configPath, created, error: message };
+	}
+}
+
+/** Load `~/.pi/agent/pi-mode-config.jsonc`, creating the commented template if absent. */
+export function loadConfig(): PiModeConfig {
+	return loadConfigFromFile(getConfigPath()).config;
 }

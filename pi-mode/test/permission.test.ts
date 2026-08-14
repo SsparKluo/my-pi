@@ -1,17 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_CONFIG } from "../src/config.ts";
+import { PLAN_PERMISSION } from "./plan-permission.ts";
 import {
 	evaluatePermission,
+	describePath,
 	extractSubject,
 	isSurfaceGloballyDenied,
 	patternMatches,
 	reconcileTools,
+	sessionApprovalHint,
 	SessionApprovals,
 	visibleTools,
 } from "../src/permission.ts";
 
 const cwd = "/home/louis/proj";
-const plan = DEFAULT_CONFIG.modes.plan?.permission;
+const plan = PLAN_PERMISSION;
 
 describe("path globs", () => {
 	it("treats * as match-all, including nested paths", () => {
@@ -46,6 +48,15 @@ describe("path globs", () => {
 		expect(patternMatches("**/*.md", "../../etc/passwd.md", "path", cwd)).toBe(false);
 		expect(patternMatches("**/*.md", "/etc/evil.md", "path", cwd)).toBe(false);
 		expect(patternMatches("**/*.md", `${cwd}/../outside.md`, "path", cwd)).toBe(false);
+	});
+
+	it("matches ~ and absolute globs against external paths", () => {
+		expect(patternMatches("~/.agents/skills/*", `${process.env.HOME}/.agents/skills/foo`, "path", cwd)).toBe(
+			true,
+		);
+		expect(patternMatches("~/.agents/skills/**", "~/.agents/skills/foo/bar", "path", cwd)).toBe(true);
+		expect(patternMatches("/tmp/**", "/tmp/out/file.ts", "path", cwd)).toBe(true);
+		expect(patternMatches("~/.agents/skills/*", "/etc/passwd", "path", cwd)).toBe(false);
 	});
 
 	it("still matches in-project paths after collapsing . and ..", () => {
@@ -193,6 +204,59 @@ describe("extractSubject", () => {
 	});
 });
 
+describe("sessionApprovalHint", () => {
+	it("shows the tool and a project-relative path for in-repo file calls", () => {
+		const hint = sessionApprovalHint(
+			{ action: "ask", surface: "read", pattern: "*", subject: `${cwd}/src/a.ts`, kind: "path" },
+			cwd,
+		);
+		expect(hint).toEqual({ tool: "read", targets: [{ display: "src/a.ts", external: false }] });
+	});
+
+	it("flags paths that escape cwd as external and keeps the absolute target", () => {
+		expect(describePath("/etc/passwd", cwd)).toEqual({ display: "/etc/passwd", external: true });
+		expect(describePath("../secrets", cwd)).toEqual({ display: "/home/louis/secrets", external: true });
+		expect(describePath("~/notes.md", cwd)).toEqual({ display: "~/notes.md", external: true });
+		const hint = sessionApprovalHint(
+			{ action: "ask", surface: "read", pattern: "*", subject: "/tmp/out/file.ts", kind: "path" },
+			cwd,
+		);
+		expect(hint).toEqual({
+			tool: "read",
+			targets: [{ display: "/tmp/out/file.ts", external: true }],
+		});
+	});
+
+	it("lists every unbash ask unit, and flags a unit that touches an external path", () => {
+		const hint = sessionApprovalHint(
+			{
+				action: "ask",
+				surface: "bash",
+				pattern: "*",
+				subject: "ls && git push origin && sudo cat /etc/hosts",
+				kind: "command",
+				askUnits: ["git push origin", "sudo cat /etc/hosts"],
+			},
+			cwd,
+		);
+		expect(hint).toEqual({
+			tool: "bash",
+			targets: [
+				{ display: "git push origin", external: false },
+				{ display: "sudo cat /etc/hosts", external: true },
+			],
+		});
+	});
+
+	it("falls back to the raw command when no ask units were recorded", () => {
+		const hint = sessionApprovalHint(
+			{ action: "ask", surface: "bash", pattern: "ls", subject: "ls -la", kind: "command" },
+			cwd,
+		);
+		expect(hint).toEqual({ tool: "bash", targets: [{ display: "ls -la", external: false }] });
+	});
+});
+
 describe("SessionApprovals", () => {
 	it("re-allows later calls that match the recorded pattern", () => {
 		const store = new SessionApprovals();
@@ -200,6 +264,13 @@ describe("SessionApprovals", () => {
 		expect(store.allows("bash", "git push origin main", "command", cwd)).toBe(true);
 		expect(store.allows("bash", "git status", "command", cwd)).toBe(false);
 		expect(store.allows("write", "git push origin main", "path", cwd)).toBe(false);
+	});
+
+	it("session-caches exact bash ask units so a later compound command can reuse them", () => {
+		const store = new SessionApprovals();
+		store.add("bash", "git push origin");
+		expect(store.allows("bash", "git push origin", "command", cwd)).toBe(true);
+		expect(store.allows("bash", "git push origin main", "command", cwd)).toBe(false);
 	});
 
 	it("treats * as the whole surface and can be cleared", () => {
