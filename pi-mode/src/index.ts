@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Key } from "@earendil-works/pi-tui";
+import { Key, Text } from "@earendil-works/pi-tui";
 import { showAskDialog } from "./ask.ts";
 import { evaluateBashCommand } from "./bash.ts";
 import {
@@ -144,38 +144,60 @@ export default function piMode(pi: ExtensionAPI): void {
 		},
 	});
 
+	type ModePrompt = { prompt: string; kind: "per" | "transition"; from?: string; to: string };
+
+	const modeIcon = (m?: string): string => (m === "plan" ? "⏸" : m === "auto" ? "⚡" : "●");
+
 	/**
-	 * Mode prompt to attach to the next user message, based on the transition
-	 * since the last sent message: same mode → perTurnPrompt; mode change (or
-	 * first message) → onExitPrompt(prev) + onEnterPrompt(curr). onEnter and
-	 * perTurn are mutually exclusive.
+	 * Mode prompt to emit at send time, based on the transition since the last
+	 * sent message: same mode → perTurnPrompt (kind "per"); mode change (or first
+	 * message) → onExitPrompt(prev) + onEnterPrompt(curr) (kind "transition").
+	 * onEnter and perTurn are mutually exclusive.
 	 */
-	function promptForMessage(): string | undefined {
+	function promptForMessage(): ModePrompt | undefined {
 		const curr = currentMode;
 		if (!curr) return undefined;
 		const currMode = config.modes[curr];
 		if (lastSentMode === curr) {
-			return currMode?.perTurnPrompt ?? undefined;
+			const per = currMode?.perTurnPrompt;
+			return per ? { prompt: per, kind: "per", to: curr } : undefined;
 		}
 		const parts: string[] = [];
 		const prevMode = lastSentMode ? config.modes[lastSentMode] : undefined;
 		if (prevMode?.onExitPrompt) parts.push(prevMode.onExitPrompt);
 		if (currMode?.onEnterPrompt) parts.push(currMode.onEnterPrompt);
-		return parts.length > 0 ? parts.join("\n\n") : undefined;
+		if (parts.length === 0) return undefined;
+		return { prompt: parts.join("\n\n"), kind: "transition", from: lastSentMode, to: curr };
 	}
 
-	// Emit the mode prompt as its own displayed block at send time — separate
-	// from the user's message and NEVER in the system prompt (appending there
-	// would invalidate the KV-cache prefix every turn). sendMessage appends the
-	// block during the input event, before the user message is committed, so it
+	// Transition blocks render as a compact label (never the raw prompt text);
+	// "per" blocks are display:false so they reach the model but stay invisible.
+	pi.registerMessageRenderer("pi-mode-prompt", (message, _opts, theme) => {
+		const d = message.details as { from?: string; to?: string } | undefined;
+		const to = d?.to;
+		const label = to === "normal"
+			? `${modeIcon(d?.from)} left ${d?.from ?? "mode"}`
+			: `${modeIcon(to)} entered ${to ?? "mode"}`;
+		return new Text(theme.fg("muted", label), 0, 0);
+	});
+
+	// Emit the mode prompt as its own block at send time — separate from the
+	// user's message and NEVER in the system prompt (appending there would
+	// invalidate the KV-cache prefix every turn). sendMessage appends the block
+	// during the input event, before the user message is committed, so it
 	// precedes the user message in both the transcript and the model context.
 	pi.on("input", async (event) => {
 		if (event.streamingBehavior) return; // only fresh messages, not mid-stream steers
-		const prompt = promptForMessage();
+		const result = promptForMessage();
 		lastSentMode = currentMode;
-		if (prompt) {
+		if (result) {
 			pi.sendMessage(
-				{ customType: "pi-mode-prompt", content: prompt, display: true, details: { mode: currentMode } },
+				{
+					customType: "pi-mode-prompt",
+					content: result.prompt,
+					display: result.kind === "transition",
+					details: { kind: result.kind, from: result.from, to: result.to },
+				},
 				{ triggerTurn: false },
 			);
 		}

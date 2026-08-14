@@ -39,7 +39,7 @@ AI bash classifier.
 | Q1 | Config-defined arbitrary modes; plan/normal/auto as defaults. |
 | Q2 | Standalone; flat permission format (`allow`/`deny`/`ask`/`classify`, last-match-wins). |
 | Q3 | `permission` block optional (omit → prompt-only). `classify` is a first-class action. Global `commandWrappers`. |
-| Q4 | Three optional prompt fields emitted as their own displayed block at send time (never the system prompt — that would bust the KV-cache prefix): `onEnterPrompt`/`onExitPrompt` on a mode change, `perTurnPrompt` while staying in a mode. State persisted via session entry. |
+| Q4 | Three optional prompt fields emitted as their own block at send time (never the system prompt — that would bust the KV-cache prefix): `onEnterPrompt`/`onExitPrompt` on a mode change (displayed as a compact label), `perTurnPrompt` while staying in a mode (invisible, model-only). State persisted via session entry. |
 | Q5 | Broadcast `pi-mode:changed` event + footer status line + session-entry-readable. UX: `--pi-mode` flag, `/mode` command + selector, cycle shortcut. No service accessor yet. |
 | Q6 | Classifier via `modelRegistry.complete`; per-unit classify, most-restrictive-wins; deny-floor before classifier; `fallback: deny`; session cache; `wholeCommandThreshold`. |
 | Q7 | Ask dialog = custom TUI (`ctx.ui.custom`); codeblock, foldable, max-height internal scroll; session approvals record the matched pattern; fail-closed non-interactive deny. |
@@ -58,9 +58,9 @@ See `config/config.example.json` for the shipped defaults.
   "commandWrappers": ["rtk","time","nice","command"],   // transparent prefixes stripped before eval
   "modes": {
     "<modeName>": {
-      "onEnterPrompt": "…" | null,   // emitted as a block on the first user message in the mode
-      "onExitPrompt":  "…" | null,   // emitted as a block on the next user message after leaving
-      "perTurnPrompt": "…" | null,   // emitted as a block before each user message while active
+      "onEnterPrompt": "…" | null,   // emitted (label) on the first user message in the mode
+      "onExitPrompt":  "…" | null,   // emitted (label) on the next user message after leaving
+      "perTurnPrompt": "…" | null,   // emitted (invisible, model-only) before each user message while active
       "permission": {                // OPTIONAL — omit for a prompt-only mode
         "<surface>": "<action>" | { "<pattern>": "<action>", ... }
       }
@@ -130,16 +130,23 @@ user's next message at send time (see Prompts below):
 2. Emit `pi-mode:changed` `{ mode, previous, reason: "switch" }`.
 3. Update footer status line.
 
-**Prompts** are emitted as a separate displayed block via `sendMessage`
-(`customType: "pi-mode-prompt"`, `display: true`, `triggerTurn: false`) during
-the `input` event — never the system prompt, and never merged into the user's
-message text. Appending to the system prompt would invalidate its KV-cache
-prefix every turn. The block is appended before the user message is committed,
-so it precedes it in both the transcript and the model context. Which prompt(s)
-the block carries depends on the mode transition since the last sent message:
+**Prompts** are emitted as a separate block via `sendMessage`
+(`customType: "pi-mode-prompt"`, `triggerTurn: false`) during the `input` event
+— never the system prompt, and never merged into the user's message text.
+Appending to the system prompt would invalidate its KV-cache prefix every turn.
+The block is appended before the user message is committed, so it precedes it
+in both the transcript and the model context. Which prompt(s) the block carries
+depends on the mode transition since the last sent message:
 - same mode as last message → `perTurnPrompt` (every message while active);
 - mode change (or first message) → `onExitPrompt`(prev) then `onEnterPrompt`(curr);
 - `onEnterPrompt` and `perTurnPrompt` are mutually exclusive.
+
+**Display.** A custom `MessageRenderer` keeps the transcript quiet:
+- `perTurnPrompt` blocks are `display: false` — they reach the model (custom
+  messages become user-role messages in `convertToLlm` regardless of `display`)
+  but render nothing;
+- transition blocks are `display: true` and render only a compact label
+  (`⏸ entered plan` / `⏸ left plan`), never the raw prompt text.
 On `session_start` resume, `lastSentMode` is seeded to the restored mode so the
 first message gets `perTurnPrompt` rather than re-announcing `onEnterPrompt`.
 
