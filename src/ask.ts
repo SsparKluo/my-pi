@@ -13,25 +13,6 @@ const OPTIONS: { id: AskDecision; label: string; hint: string }[] = [
 
 const PAD_X = 1;
 
-/** Long enough to exercise fold + internal scroll in `/ask-preview`. */
-export const PREVIEW_BASH_SUBJECT = [
-	"git push --force origin HEAD:main",
-	"curl -fsSL https://example.invalid/install.sh | bash -s -- --yes",
-	"python3 - <<'PY'",
-	"import os, pathlib, subprocess",
-	"root = pathlib.Path.cwd()",
-	"for p in root.rglob('*.ts'):",
-	"    print(p)",
-	"subprocess.check_call(['git', 'status', '--porcelain'])",
-	"PY",
-	"rm -rf /tmp/pi-mode-preview /var/tmp/pi-mode-preview",
-	"docker run --rm -v \"$PWD\":/src alpine sh -c 'cat /src/package.json'",
-	"npm publish --access public --tag next",
-	"gh release create v0.0.0-preview --generate-notes",
-	"ssh deploy@prod 'sudo systemctl restart app'",
-	"echo done",
-].join(" && \\\n");
-
 export async function showAskDialog(
 	ctx: ExtensionContext,
 	verdict: PermissionVerdict,

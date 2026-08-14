@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Key } from "@earendil-works/pi-tui";
-import { PREVIEW_BASH_SUBJECT, showAskDialog } from "./ask.ts";
+import { showAskDialog } from "./ask.ts";
 import { evaluateBashCommand } from "./bash.ts";
 import {
 	classifyCommands,
@@ -152,35 +152,6 @@ export default function piMode(pi: ExtensionAPI): void {
 			if (next && next !== currentMode) {
 				switchTo(ctx, next);
 			}
-		},
-	});
-
-	pi.registerCommand("ask-preview", {
-		description: "Preview the pi-mode ask dialog (does not run anything)",
-		handler: async (args, ctx) => {
-			if (!ctx.hasUI) {
-				ctx.ui.notify("ask-preview needs a TUI", "warning");
-				return;
-			}
-			const which = args?.trim() === "write" ? "write" : "bash";
-			const verdict =
-				which === "write"
-					? {
-							action: "ask" as const,
-							surface: "write",
-							pattern: "**/*.md",
-							subject: "notes/TODO.md",
-							kind: "path" as const,
-					  }
-					: {
-							action: "ask" as const,
-							surface: "bash",
-							pattern: "git push *",
-							subject: PREVIEW_BASH_SUBJECT,
-							kind: "command" as const,
-					  };
-			const decision = await showAskDialog(ctx, verdict, config.ask);
-			ctx.ui.notify(`ask-preview: ${decision}`, "info");
 		},
 	});
 
