@@ -1,9 +1,10 @@
 import type { Action, ClassifierConfig } from "./config.ts";
 
 export const DEFAULT_CLASSIFIER_PROMPT = `You are a safety classifier for bash commands in a coding-agent session.
-Reply with exactly one word: allow or deny.
+Reply with exactly one word from the allowed verdicts listed in the user message.
 deny if the command could destroy data, exfiltrate secrets, escalate privileges, or do something the user did not imply.
-allow routine read-only inspection or project-local work.`;
+allow routine read-only inspection or project-local work.
+ask only if ask is an allowed verdict and you cannot decide.`;
 
 export function parseModelRef(ref: string): { provider: string; modelId: string } | null {
 	const slash = ref.indexOf("/");
@@ -61,6 +62,7 @@ export function buildClassifierUserContent(opts: {
 	userMessages: string[];
 	wholeCommand: string;
 	target: string;
+	verdicts?: string[];
 }): string {
 	const parts: string[] = [];
 	if (opts.agentsMd.trim()) {
@@ -71,6 +73,8 @@ export function buildClassifierUserContent(opts: {
 	}
 	parts.push("## Full command (context)", opts.wholeCommand);
 	parts.push("## Classify this", opts.target);
+	const verdicts = opts.verdicts?.length ? opts.verdicts : ["allow", "deny"];
+	parts.push("## Allowed verdicts (reply with exactly one)", verdicts.join(" | "));
 	return parts.join("\n\n");
 }
 
@@ -114,6 +118,7 @@ export async function classifyCommands(opts: {
 						userMessages: opts.userMessages,
 						wholeCommand: opts.wholeCommand,
 						target,
+						verdicts: opts.config.verdicts,
 					}),
 				});
 			} catch {

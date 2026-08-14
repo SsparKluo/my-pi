@@ -34,6 +34,11 @@ describe("parseClassifierVerdict", () => {
 		expect(parseClassifierVerdict("nope", v, "deny")).toBe("deny");
 		expect(parseClassifierVerdict("maybe", v, "allow")).toBe("allow");
 	});
+
+	it("only accepts ask when it is in the verdict list", () => {
+		expect(parseClassifierVerdict("ask", ["allow", "deny", "ask"], "deny")).toBe("ask");
+		expect(parseClassifierVerdict("ask", ["allow", "deny"], "deny")).toBe("deny");
+	});
 });
 
 describe("mergeClassifierVerdicts", () => {
@@ -117,7 +122,7 @@ describe("classifyCommands", () => {
 				throw new Error("offline");
 			},
 		});
-		await expect(boom).resolves.toBe("deny");
+		await expect(boom).resolves.toBe("ask");
 
 		const junk = classifyCommands({
 			config: cfg,
@@ -128,7 +133,7 @@ describe("classifyCommands", () => {
 			cache: new Map(),
 			complete: async () => "not a verdict",
 		});
-		await expect(junk).resolves.toBe("deny");
+		await expect(junk).resolves.toBe("ask");
 	});
 
 	it("classifies each target and merges deny over allow", async () => {
@@ -143,7 +148,10 @@ describe("classifyCommands", () => {
 			agentsMd: "",
 			userMessages: [],
 			cache: new Map(),
-			complete: async (call) => replies.get(call.userContent.split("\n").at(-1) ?? "") ?? "??",
+			complete: async (call) => {
+				const target = call.userContent.match(/## Classify this\n+([^\n]+)/)?.[1] ?? "";
+				return replies.get(target) ?? "??";
+			},
 		});
 		expect(action).toBe("deny");
 	});

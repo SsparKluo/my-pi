@@ -4,8 +4,12 @@ import { fileURLToPath } from "node:url";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { parseJsonc } from "./jsonc.ts";
 
-/** A permission action. `classify` routes bash to the AI classifier. */
+/** A permission action. `classify` routes bash to bash-classify (or the AI engine). */
 export type Action = "allow" | "deny" | "ask" | "classify";
+
+export type BashClass = "READONLY" | "LOCAL_EFFECTS" | "EXTERNAL_EFFECTS" | "DANGEROUS" | "UNKNOWN";
+export type BashRisk = "LOW" | "MEDIUM" | "HIGH";
+export type ClassifierEngine = "bash-classify" | "model";
 
 /** A surface's rules: a single action, or a pattern→action map (last-match-wins). */
 export type SurfaceRule = Action | Record<string, Action>;
@@ -14,14 +18,28 @@ export interface PermissionRules {
 	[surface: string]: SurfaceRule;
 }
 
+export interface ClassifyMap {
+	byRisk?: Partial<Record<BashRisk, Action>>;
+	byClass?: Partial<Record<BashClass, Action>>;
+	/** LLM allowed answers. Omit `ask` for a hands-off mode. */
+	verdicts?: string[];
+	fallback?: Action;
+}
+
 export interface ModeConfig {
 	onEnterPrompt?: string | null;
 	onExitPrompt?: string | null;
 	perTurnPrompt?: string | null;
 	permission?: PermissionRules;
+	/** Per-mode overlay on the global classifier maps. */
+	classify?: ClassifyMap;
 }
 
 export interface ClassifierConfig {
+	engine: ClassifierEngine;
+	command: string;
+	byRisk: Partial<Record<BashRisk, Action>>;
+	byClass: Partial<Record<BashClass, Action>>;
 	model: string;
 	verdicts: string[];
 	fallback: Action;
@@ -65,9 +83,13 @@ export const DEFAULT_CONFIG: PiModeConfig = {
 		[DEFAULT_MODE]: {},
 	},
 	classifier: {
+		engine: "bash-classify",
+		command: "bash-classify",
+		byRisk: { LOW: "allow", MEDIUM: "ask", HIGH: "ask" },
+		byClass: {},
 		model: "anthropic/claude-haiku-4-5",
 		verdicts: ["allow", "deny"],
-		fallback: "deny",
+		fallback: "ask",
 		cache: true,
 		wholeCommandThreshold: 2,
 		prompt: null,
@@ -98,6 +120,86 @@ function sanitizeSurfaceRule(rule: SurfaceRule): SurfaceRule {
 	return out;
 }
 
+const OPEN_PERMISSION: PermissionRules = { "*": "allow" };
+
+/** Child surface/pattern keys overwrite the parent; unspecified keys are kept. */
+export function mergePermissionRules(base: PermissionRules, over: PermissionRules): PermissionRules {
+	const out: PermissionRules = { ...base };
+	for (const [surface, rule] of Object.entries(over)) {
+		const prev = out[surface];
+		if (isPatternMap(rule) && isPatternMap(prev)) {
+			out[surface] = { ...prev, ...rule };
+		} else if (isPatternMap(rule) && (prev === undefined || prev === "allow")) {
+			// Open parent + child's partial map: keep unspecified commands allowed.
+			out[surface] = { "*": "allow", ...rule };
+		} else {
+			out[surface] = rule;
+		}
+	}
+	return out;
+}
+
+function isPatternMap(rule: SurfaceRule | undefined): rule is Record<string, Action> {
+	return !!rule && typeof rule === "object" && !Array.isArray(rule);
+}
+
+function mergeClassifyMaps(base?: ClassifyMap, over?: ClassifyMap): ClassifyMap | undefined {
+	if (!base && !over) return undefined;
+	return {
+		byRisk: { ...base?.byRisk, ...over?.byRisk },
+		byClass: { ...base?.byClass, ...over?.byClass },
+		verdicts: over?.verdicts ?? base?.verdicts,
+		fallback: over?.fallback ?? base?.fallback,
+	};
+}
+
+/** `default` stays as written. Other modes inherit its permission + classify maps (or all-allow if it has none). */
+export function inheritPermissions(modes: Record<string, ModeConfig>): Record<string, ModeConfig> {
+	const parent = modes.default?.permission;
+	const parentClassify = modes.default?.classify;
+	const out: Record<string, ModeConfig> = {};
+	for (const [name, mode] of Object.entries(modes)) {
+		if (name === "default") {
+			out[name] = mode;
+			continue;
+		}
+		const child = mode?.permission;
+		if (!parent && !child && !parentClassify && !mode?.classify) {
+			out[name] = mode;
+			continue;
+		}
+		const base = parent ?? (child ? OPEN_PERMISSION : undefined);
+		out[name] = {
+			...mode,
+			permission: child && base ? mergePermissionRules(base, child) : child ?? (base ? structuredClone(base) : child),
+			classify: mergeClassifyMaps(parentClassify, mode?.classify),
+		};
+	}
+	return out;
+}
+
+function sanitizeClassifyMap(raw: unknown): ClassifyMap | undefined {
+	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+	const rec = raw as ClassifyMap;
+	const out: ClassifyMap = {};
+	if (rec.byRisk && typeof rec.byRisk === "object") {
+		out.byRisk = Object.fromEntries(
+			Object.entries(rec.byRisk).map(([k, v]) => [k, asAction(v, "ask")]),
+		) as ClassifyMap["byRisk"];
+	}
+	if (rec.byClass && typeof rec.byClass === "object") {
+		out.byClass = Object.fromEntries(
+			Object.entries(rec.byClass).map(([k, v]) => [k, asAction(v, "ask")]),
+		) as ClassifyMap["byClass"];
+	}
+	if (Array.isArray(rec.verdicts)) {
+		const kept = rec.verdicts.filter((v): v is string => typeof v === "string" && ACTIONS.has(v as Action));
+		if (kept.length > 0) out.verdicts = kept;
+	}
+	if (rec.fallback !== undefined) out.fallback = asAction(rec.fallback);
+	return out;
+}
+
 function sanitizeModes(modes: Record<string, ModeConfig>): Record<string, ModeConfig> {
 	const out: Record<string, ModeConfig> = {};
 	for (const [name, mode] of Object.entries(modes)) {
@@ -109,6 +211,7 @@ function sanitizeModes(modes: Record<string, ModeConfig>): Record<string, ModeCo
 						Object.entries(permission).map(([surface, rule]) => [surface, sanitizeSurfaceRule(rule)]),
 					)
 				: permission,
+			classify: sanitizeClassifyMap(mode?.classify),
 		};
 	}
 	return out;
@@ -129,13 +232,21 @@ export function parseConfig(parsed: unknown): PiModeConfig {
 			? (rawModes as Record<string, ModeConfig>)
 			: DEFAULT_CONFIG.modes;
 	const classifierIn = (p.classifier ?? {}) as Partial<ClassifierConfig>;
+	const classifyMaps = sanitizeClassifyMap(classifierIn) ?? {};
+	const engine = classifierIn.engine === "model" ? "model" : DEFAULT_CONFIG.classifier.engine;
 	return {
 		defaultMode: typeof p.defaultMode === "string" ? p.defaultMode : DEFAULT_CONFIG.defaultMode,
 		commandWrappers: Array.isArray(p.commandWrappers) ? p.commandWrappers : DEFAULT_CONFIG.commandWrappers,
-		modes: sanitizeModes(structuredClone(modes)),
+		modes: inheritPermissions(sanitizeModes(structuredClone(modes))),
 		classifier: {
 			...DEFAULT_CONFIG.classifier,
 			...classifierIn,
+			engine,
+			command: typeof classifierIn.command === "string" && classifierIn.command.trim()
+				? classifierIn.command.trim()
+				: DEFAULT_CONFIG.classifier.command,
+			byRisk: { ...DEFAULT_CONFIG.classifier.byRisk, ...classifyMaps.byRisk },
+			byClass: { ...DEFAULT_CONFIG.classifier.byClass, ...classifyMaps.byClass },
 			fallback: asAction(classifierIn.fallback ?? DEFAULT_CONFIG.classifier.fallback),
 			verdicts: sanitizeVerdicts(classifierIn.verdicts ?? DEFAULT_CONFIG.classifier.verdicts),
 		},

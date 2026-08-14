@@ -1,86 +1,50 @@
 // pi-mode — ~/.pi/agent/pi-mode-config.jsonc
 //
-// `default` has no permission block → same as vanilla pi (no gating).
-// Copy a commented example below into "modes" to add your own.
+// Written on first load. One mode: `default`.
+// No prompts. In-workspace tools are allowed (except reading .env).
+// bash-classify: READONLY + LOCAL_EFFECTS allow; everything else asks.
+// Omit `permission` entirely for vanilla pi (no gating).
+// last-match-wins: later keys overwrite (e.g. "*": "classify", "rm *": "ask").
 
 {
   "defaultMode": "default",
+  "commandWrappers": ["rtk", "time", "nice", "command"],
   "modes": {
     "default": {
-      // omit permission / prompts for vanilla pi
+      "onEnterPrompt": null,
+      "onExitPrompt": null,
+      "perTurnPrompt": null,
+      "classify": {
+        "byClass": {
+          "READONLY": "allow",
+          "LOCAL_EFFECTS": "allow",
+          "EXTERNAL_EFFECTS": "ask",
+          "DANGEROUS": "ask",
+          "UNKNOWN": "ask"
+        }
+      },
+      "permission": {
+        "*": "allow",
+        "read": {
+          "*": "allow",
+          "*.env": "ask",
+          "*.env.*": "ask",
+          "*.env.example": "allow"
+        },
+        "externalPath": "ask",
+        "bash": "classify"
+      }
     }
   }
 }
 
-// ── Add modes by copying into "modes" above ──────────────────────────
-//
-// "plan": {
-//   "onEnterPrompt": "You are now in PLAN MODE (read-only). Investigate and produce a plan. You may only edit *.md files; do not modify code.",
-//   "onExitPrompt": "PLAN MODE ended. Full permissions restored.",
-//   "perTurnPrompt": "Current mode: plan — read-only; *.md writes only; bash restricted to a read-only allowlist.",
-//   "permission": {
-//     "*": "ask",
-//     "read": "allow",
-//     "grep": "allow",
-//     "find": "allow",
-//     "ls": "allow",
-//     "write": { "*": "deny", "**/*.md": "allow" },
-//     "edit": { "*": "deny", "**/*.md": "allow" },
-//     "bash": {
-//       "*": "deny",
-//       "ls": "allow",
-//       "ls *": "allow",
-//       "cat *": "allow",
-//       "head *": "allow",
-//       "tail *": "allow",
-//       "grep *": "allow",
-//       "rg *": "allow",
-//       "find *": "allow",
-//       "fd *": "allow",
-//       "git status": "allow",
-//       "git diff *": "allow",
-//       "git log *": "allow",
-//       "git branch": "allow",
-//       "git show *": "allow",
-//       "pwd": "allow",
-//       "tree *": "allow",
-//       "wc *": "allow"
-//     }
-//   }
-// }
-//
-// "auto": {
-//   "onEnterPrompt": "You are in AUTO MODE. Bash commands are auto-approved by a safety classifier; file access is unrestricted.",
-//   "onExitPrompt": "AUTO MODE ended.",
-//   "perTurnPrompt": "Current mode: auto — bash auto-approved by a safety classifier; file access unrestricted.",
-//   "permission": {
-//     "*": "allow",
-//     "bash": "classify"
-//   }
-// }
-//
-// ── Optional top-level (filled from built-in defaults if omitted) ──
-//
-// "commandWrappers": ["rtk", "time", "nice", "command"]
-//
-// "classifier": {
-//   "model": "anthropic/claude-haiku-4-5",
-//   "verdicts": ["allow", "deny"],
-//   "fallback": "deny",
-//   "cache": true,
-//   "wholeCommandThreshold": 2,
-//   "prompt": null
-// }
-//
-// "ask": {
-//   "maxBlockHeight": 10
-// }
-//
 // ── Schema ──────────────────────────────────────────────────────────
 //
-// surfaces:  bash | read | write | edit | grep | find | ls | path | *
+// surfaces:  bash | read | write | edit | grep | find | ls | externalPath | *
 // actions:   allow | deny | ask | classify
+// classify:  bash-classify (READONLY / LOCAL_EFFECTS / EXTERNAL_EFFECTS / DANGEROUS / UNKNOWN)
+//            + risk LOW / MEDIUM / HIGH. Mode `classify.byClass` / `byRisk` maps to actions.
 // value:     "<action>"  or  { "<pattern>": "<action>", ... }   (last-match-wins)
 // bash/tool patterns = command-prefix globs ("git push *")
-// write/edit/path    = file-path globs ("**/*.md")
+// write/edit/externalPath = file-path globs ("**/*.md"); externalPath only gates paths outside cwd
 // omit permission    = no gating (vanilla pi / prompt-only)

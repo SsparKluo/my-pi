@@ -22,6 +22,52 @@ describe("parseConfig", () => {
 		expect(cfg.modes.default?.permission).toBeUndefined();
 	});
 
+	it("lets other modes inherit an open default, then overwrite listed surfaces", () => {
+		const cfg = parseConfig({
+			modes: {
+				default: {},
+				build: {
+					permission: {
+						bash: { "rm *": "ask" },
+						edit: "ask",
+					},
+				},
+			},
+		});
+		expect(cfg.modes.default?.permission).toBeUndefined();
+		expect(cfg.modes.build?.permission).toEqual({
+			"*": "allow",
+			edit: "ask",
+			bash: { "*": "allow", "rm *": "ask" },
+		});
+	});
+
+	it("deep-merges a child's permission over default's", () => {
+		const cfg = parseConfig({
+			modes: {
+				default: {
+					permission: {
+						"*": "ask",
+						read: "allow",
+						bash: { "*": "ask", ls: "allow" },
+					},
+				},
+				build: {
+					permission: {
+						edit: "allow",
+						bash: { "rm *": "deny" },
+					},
+				},
+			},
+		});
+		expect(cfg.modes.build?.permission).toEqual({
+			"*": "ask",
+			read: "allow",
+			edit: "allow",
+			bash: { "*": "ask", ls: "allow", "rm *": "deny" },
+		});
+	});
+
 	it("keeps valid custom actions", () => {
 		const cfg = parseConfig({
 			modes: {
@@ -56,6 +102,7 @@ describe("parseConfig", () => {
 			},
 		});
 		expect(cfg.modes.typo?.permission).toEqual({
+			"*": "allow",
 			read: "deny",
 			write: { "*": "deny", "**/*.md": "allow" },
 			bash: "deny",
@@ -97,7 +144,9 @@ describe("parseJsonc", () => {
 		const parsed = parseConfig(parseJsonc(raw));
 		expect(parsed.defaultMode).toBe("default");
 		expect(Object.keys(parsed.modes)).toEqual(["default"]);
-		expect(parsed.modes.default?.permission).toBeUndefined();
+		expect(parsed.modes.default?.permission?.bash).toBe("classify");
+		expect(parsed.modes.default?.classify?.byClass?.READONLY).toBe("allow");
+		expect(parsed.modes.default?.classify?.byClass?.EXTERNAL_EFFECTS).toBe("ask");
 	});
 });
 
@@ -110,10 +159,10 @@ describe("loadConfigFromFile", () => {
 		expect(result.error).toBeUndefined();
 		expect(result.config.defaultMode).toBe("default");
 		expect(Object.keys(result.config.modes)).toEqual(["default"]);
-		expect(result.config.modes.default?.permission).toBeUndefined();
+		expect(result.config.modes.default?.permission?.bash).toBe("classify");
 		const written = readFileSync(path, "utf-8");
 		expect(written).toContain("//");
-		expect(written).toContain("plan");
+		expect(written).toContain("READONLY");
 	});
 
 	it("loads an existing jsonc file without rewriting it", () => {

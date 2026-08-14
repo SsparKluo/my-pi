@@ -4,6 +4,12 @@ import { Key, Text } from "@earendil-works/pi-tui";
 import { showAskDialog } from "./ask.ts";
 import { evaluateBashCommand } from "./bash.ts";
 import {
+	createBashClassifyRunner,
+	gradeBashUnits,
+	mergeClassifyMaps,
+	mostRestrictiveAction,
+} from "./bash-classify.ts";
+import {
 	classifyCommands,
 	collectAgentsMd,
 	lastUserTexts,
@@ -12,6 +18,7 @@ import {
 import { getConfigPath, loadConfig, type Action, type PiModeConfig } from "./config.ts";
 import { reportHerdrMode, setHerdrBlocked } from "./herdr.ts";
 import {
+	applyExternalPathGate,
 	evaluatePermission,
 	extractSubject,
 	reconcileTools,
@@ -29,6 +36,7 @@ type ChangeReason = "startup" | "resume" | "reload" | "switch";
  */
 export default function piMode(pi: ExtensionAPI): void {
 	const config: PiModeConfig = loadConfig();
+	const bashClassify = createBashClassifyRunner(config.classifier.command);
 
 	let currentMode: string | undefined;
 	// Mode active when the last user message was sent. Drives which prompt
@@ -231,10 +239,29 @@ export default function piMode(pi: ExtensionAPI): void {
 						config.classifier.wholeCommandThreshold,
 						ctx.cwd,
 				  )
-				: evaluatePermission(rules, surface, subject, ctx.cwd);
+				: applyExternalPathGate(
+						evaluatePermission(rules, surface, subject, ctx.cwd),
+						rules,
+						ctx.cwd,
+				  );
 		let action = verdict.action;
 		if (action === "classify") {
-			action = await classifyVerdict(ctx, verdict.subject, verdict.classifyTargets ?? [verdict.subject]);
+			const targets = verdict.classifyTargets ?? [verdict.subject];
+			if (config.classifier.engine === "model") {
+				action = await classifyVerdict(ctx, verdict.subject, targets);
+			} else {
+				const maps = mergeClassifyMaps(
+					config.classifier,
+					currentMode ? config.modes[currentMode]?.classify : undefined,
+				);
+				const graded = await gradeBashUnits(targets, maps, config.classifier.fallback, bashClassify);
+				const needsLlm = graded.filter((g) => g.action === "classify").map((g) => g.unit);
+				const rest = graded.filter((g) => g.action !== "classify").map((g) => g.action);
+				if (needsLlm.length > 0) {
+					rest.push(await classifyVerdict(ctx, verdict.subject, needsLlm));
+				}
+				action = mostRestrictiveAction(rest, config.classifier.fallback);
+			}
 		}
 		if (action === "allow") return;
 		if (action === "deny") {
@@ -282,10 +309,16 @@ export default function piMode(pi: ExtensionAPI): void {
 
 	// Restore (resume) or initialize (startup) the active mode.
 	async function classifyVerdict(ctx: ExtensionContext, wholeCommand: string, targets: string[]): Promise<Action> {
-		const ref = parseModelRef(config.classifier.model);
+		const modeClassify = currentMode ? config.modes[currentMode]?.classify : undefined;
+		const classifier = {
+			...config.classifier,
+			verdicts: modeClassify?.verdicts ?? config.classifier.verdicts,
+			fallback: modeClassify?.fallback ?? config.classifier.fallback,
+		};
+		const ref = parseModelRef(classifier.model);
 		const model = ref ? ctx.modelRegistry.find(ref.provider, ref.modelId) : undefined;
 		return classifyCommands({
-			config: config.classifier,
+			config: classifier,
 			wholeCommand,
 			targets,
 			agentsMd,
