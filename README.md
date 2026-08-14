@@ -180,20 +180,30 @@ JSONC (comments + trailing commas). Lives in the agent dir (respects `PI_AGENT_D
 ```jsonc
 {
   "defaultMode": "default",
+  "bashClassify": {
+    "command": "bash-classify",
+    "byRisk": { "LOW": "allow", "MEDIUM": "ask", "HIGH": "ask" },
+    "byClass": {
+      "READONLY": "allow",
+      "LOCAL_EFFECTS": "allow",
+      "EXTERNAL_EFFECTS": "ask",
+      "DANGEROUS": "ask",
+      "UNKNOWN": "ask"
+    },
+    "fallback": "ask"
+  },
+  "model": {
+    "model": "anthropic/claude-haiku-4-5",
+    "fallbackModels": [],
+    "verdicts": ["allow", "deny"],
+    "fallback": "deny",
+    "cache": true
+  },
   "modes": {
     "default": {
       "onEnterPrompt": null,
       "onExitPrompt": null,
       "perTurnPrompt": null,
-      "classify": {
-        "byClass": {
-          "READONLY": "allow",
-          "LOCAL_EFFECTS": "allow",
-          "EXTERNAL_EFFECTS": "ask",
-          "DANGEROUS": "ask",
-          "UNKNOWN": "ask"
-        }
-      },
       "permission": {
         "*": "allow",
         "read": { "*": "allow", "*.env": "ask", "*.env.*": "ask", "*.env.example": "allow" },
@@ -213,17 +223,23 @@ JSONC (comments + trailing commas). Lives in the agent dir (respects `PI_AGENT_D
 | `modes.<name>.onExitPrompt` | Emitted (compact label) on first message after leaving |
 | `modes.<name>.perTurnPrompt` | Emitted every turn while in the mode (invisible, model-only) |
 | `modes.<name>.permission` | Optional. Omit = prompt-only mode. Surfaces × actions (below) |
-| `classifier.model` | Model for `classify` actions (`provider/modelId`) |
-| `classifier.verdicts` | Allowed classifier answers (default `allow`/`deny`) |
-| `classifier.fallback` | Used on error / unparseable (default `deny`) |
-| `classifier.cache` | Per-session cache of classify results |
-| `classifier.wholeCommandThreshold` | If more units need classify than this, classify the whole command |
-| `classifier.prompt` | Override classifier system prompt (`null` = built-in) |
+| `modes.<name>.classify` | Per-mode overlay on the bashClassify grade maps |
+| `modes.<name>.model` | Per-mode overlay on the model classifier (verdicts / fallback) |
+| `bashClassify.command` | CLI invoked per bash unit (stdin → JSON `{classification, risk}`) |
+| `bashClassify.byRisk` / `byClass` | Grade maps: verdict per risk/class. Value `model` defers the unit to the small LLM |
+| `bashClassify.fallback` | Used when the CLI fails or a verdict maps to nothing (default `ask`) |
+| `bashClassify.wholeCommandThreshold` | If more units need grading than this, grade the whole command |
+| `model.model` | Small LLM for deferred units (`provider/modelId`) |
+| `model.fallbackModels` | Tried in order when the primary model fails / is unauthenticated |
+| `model.verdicts` | Allowed LLM answers (default `allow`/`deny`; omit `ask` for hands-off) |
+| `model.fallback` | Used on error / unparseable (default `deny`) |
+| `model.cache` | Per-session cache of LLM verdicts |
+| `model.prompt` | Override classifier system prompt (`null` = built-in) |
 | `ask.maxBlockHeight` | Max visible lines of the command body in the ask dialog |
 
 **Permission surfaces:** `bash`, `read`, `write`, `edit`, `grep`, `find`, `ls`, `externalPath`, `*` (catch-all).
 
-**Actions:** `allow` | `deny` | `ask` | `classify` (bash → AI classifier).
+**Actions:** `allow` | `deny` | `ask` | `classify` (bash → bash-classify grading; classes mapped to `model` go to the small LLM).
 
 **Value forms:** a string applies to the whole surface (`"read": "allow"`); an object is a pattern→action map, **last-match-wins**. Bash/tool patterns are command-prefix globs (`"git push *"`); write/edit/path patterns are file-path globs (`"**/*.md"`). Modes are config-defined — add your own freely.
 

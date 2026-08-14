@@ -174,8 +174,8 @@ Triggered only when a bash unit/surface resolves to `classify` (e.g. auto mode).
 
 - Model: `model.model` via `modelRegistry.complete`
 - Context: classifier prompt + loaded `AGENTS.md` + last 3 user messages + whole original command + the uncertain unit(s)
-- Verdicts: `classifier.verdicts` (default `allow`/`deny`); on error/unparseable → `classifier.fallback` (default `deny`)
-- Session cache when `classifier.cache` is true
+- Verdicts: `model.verdicts` (default `allow`/`deny`); on error/unparseable → `model.fallback` (default `deny`)
+- Session cache when `model.cache` is true; `model.fallbackModels` tried in order first
 - Flat `deny` rules always win before the classifier runs
 - `wholeCommandThreshold` (default 2): if more than this many units need classify, classify the whole command instead
 
