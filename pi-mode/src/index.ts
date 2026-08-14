@@ -30,6 +30,9 @@ export default function piMode(pi: ExtensionAPI): void {
 	const config: PiModeConfig = loadConfig();
 
 	let currentMode: string | undefined;
+	// Mode active when the last user message was sent. Drives which prompt
+	// (perTurn vs onExit+onEnter) the next message carries.
+	let lastSentMode: string | undefined;
 	const approvals = new SessionApprovals();
 	const classifyCache = new Map<string, Action>();
 	let agentsMd = "";
@@ -56,31 +59,17 @@ export default function piMode(pi: ExtensionAPI): void {
 		}
 	}
 
-	function injectPrompt(prompt: string | null | undefined, kind: "enter" | "exit"): void {
-		if (!prompt) return;
-		pi.sendMessage({ customType: `pi-mode-${kind}`, content: prompt, display: true }, { triggerTurn: false });
-	}
-
 	function setMode(
 		ctx: ExtensionContext,
 		name: string,
-		opts: { reason: ChangeReason; announce: boolean; persist: boolean },
+		opts: { reason: ChangeReason; persist: boolean },
 	): void {
 		if (name === currentMode) return; // no-op
 		const previous = currentMode;
-
-		if (opts.announce && previous && previous !== name) {
-			injectPrompt(config.modes[previous]?.onExitPrompt, "exit");
-		}
-
 		currentMode = name;
 
 		if (opts.persist) {
 			pi.appendEntry(STATE_ENTRY, { mode: name, ts: Date.now() });
-		}
-
-		if (opts.announce) {
-			injectPrompt(config.modes[name]?.onEnterPrompt, "enter");
 		}
 
 		pi.events.emit(EVENT_CHANGED, { mode: name, previous, reason: opts.reason });
@@ -109,7 +98,7 @@ export default function piMode(pi: ExtensionAPI): void {
 			ctx.ui.notify(`Already in ${name} mode`, "info");
 			return true;
 		}
-		setMode(ctx, name, { reason: "switch", announce: true, persist: true });
+		setMode(ctx, name, { reason: "switch", persist: true });
 		ctx.ui.notify(`Switched to ${name} mode`, "info");
 		return true;
 	}
@@ -155,15 +144,41 @@ export default function piMode(pi: ExtensionAPI): void {
 		},
 	});
 
-	// Hide globally-denied tools + append perTurn prompt (both recomputed each turn).
+	/**
+	 * Mode prompt to attach to the next user message, based on the transition
+	 * since the last sent message: same mode → perTurnPrompt; mode change (or
+	 * first message) → onExitPrompt(prev) + onEnterPrompt(curr). onEnter and
+	 * perTurn are mutually exclusive.
+	 */
+	function promptForMessage(): string | undefined {
+		const curr = currentMode;
+		if (!curr) return undefined;
+		const currMode = config.modes[curr];
+		if (lastSentMode === curr) {
+			return currMode?.perTurnPrompt ?? undefined;
+		}
+		const parts: string[] = [];
+		const prevMode = lastSentMode ? config.modes[lastSentMode] : undefined;
+		if (prevMode?.onExitPrompt) parts.push(prevMode.onExitPrompt);
+		if (currMode?.onEnterPrompt) parts.push(currMode.onEnterPrompt);
+		return parts.length > 0 ? parts.join("\n\n") : undefined;
+	}
+
+	// Attach mode prompts to the user's message at send time. NEVER inject into
+	// the system prompt — that would invalidate the KV-cache prefix every turn.
+	pi.on("input", async (event) => {
+		if (event.streamingBehavior) return; // only fresh messages, not mid-stream steers
+		const prompt = promptForMessage();
+		lastSentMode = currentMode;
+		if (prompt) {
+			return { action: "transform", text: `${prompt}\n\n${event.text}`, images: event.images };
+		}
+	});
+
+	// Reconcile tools each turn (mode prompts travel with the user message, not here).
 	pi.on("before_agent_start", async (event) => {
 		agentsMd = collectAgentsMd(event.systemPromptOptions?.contextFiles);
-		if (!currentMode) return;
-		applyToolsForMode(currentMode);
-		const prompt = config.modes[currentMode]?.perTurnPrompt;
-		if (prompt) {
-			return { systemPrompt: `${event.systemPrompt}\n\n${prompt}` };
-		}
+		if (currentMode) applyToolsForMode(currentMode);
 	});
 
 	pi.on("tool_call", async (event, ctx) => {
@@ -266,15 +281,16 @@ export default function piMode(pi: ExtensionAPI): void {
 		const isValid = (n: unknown): n is string => typeof n === "string" && !!config.modes[n];
 
 		if (isValid(flagMode)) {
-			// Explicit --pi-mode flag: treat as a switch.
-			setMode(ctx, flagMode, { reason: "switch", announce: true, persist: true });
+			// Explicit --pi-mode flag: first message announces onEnter.
+			setMode(ctx, flagMode, { reason: "switch", persist: true });
 		} else if (isValid(persisted)) {
-			// Resume: silently restore, no re-announce.
-			setMode(ctx, persisted, { reason: "resume", announce: false, persist: false });
+			// Resume: mode was already active → first message gets perTurn, not onEnter.
+			setMode(ctx, persisted, { reason: "resume", persist: false });
+			lastSentMode = persisted;
 		} else {
 			// First start: enter the configured default.
 			const def = config.modes[config.defaultMode] ? config.defaultMode : "normal";
-			setMode(ctx, def, { reason: "startup", announce: true, persist: true });
+			setMode(ctx, def, { reason: "startup", persist: true });
 		}
 	});
 }

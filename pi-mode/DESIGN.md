@@ -39,7 +39,7 @@ AI bash classifier.
 | Q1 | Config-defined arbitrary modes; plan/normal/auto as defaults. |
 | Q2 | Standalone; flat permission format (`allow`/`deny`/`ask`/`classify`, last-match-wins). |
 | Q3 | `permission` block optional (omit → prompt-only). `classify` is a first-class action. Global `commandWrappers`. |
-| Q4 | Three optional prompt fields: `onEnterPrompt`, `onExitPrompt` (stored messages), `perTurnPrompt` (ephemeral system-prompt append). State persisted via session entry. |
+| Q4 | Three optional prompt fields attached to the **user message** at send time (never the system prompt — that would bust the KV-cache prefix): `onEnterPrompt`/`onExitPrompt` on a mode change, `perTurnPrompt` while staying in a mode. State persisted via session entry. |
 | Q5 | Broadcast `pi-mode:changed` event + footer status line + session-entry-readable. UX: `--pi-mode` flag, `/mode` command + selector, cycle shortcut. No service accessor yet. |
 | Q6 | Classifier via `modelRegistry.complete`; per-unit classify, most-restrictive-wins; deny-floor before classifier; `fallback: deny`; session cache; `wholeCommandThreshold`. |
 | Q7 | Ask dialog = custom TUI (`ctx.ui.custom`); codeblock, foldable, max-height internal scroll; session approvals record the matched pattern; fail-closed non-interactive deny. |
@@ -58,9 +58,9 @@ See `config/config.example.json` for the shipped defaults.
   "commandWrappers": ["rtk","time","nice","command"],   // transparent prefixes stripped before eval
   "modes": {
     "<modeName>": {
-      "onEnterPrompt": "…" | null,   // stored visible message on enter
-      "onExitPrompt":  "…" | null,   // stored visible message on exit
-      "perTurnPrompt": "…" | null,   // ephemeral system-prompt append each turn
+      "onEnterPrompt": "…" | null,   // prepended to the next user message on entering the mode
+      "onExitPrompt":  "…" | null,   // prepended to the next user message on leaving the mode
+      "perTurnPrompt": "…" | null,   // prepended to each user message while the mode stays active
       "permission": {                // OPTIONAL — omit for a prompt-only mode
         "<surface>": "<action>" | { "<pattern>": "<action>", ... }
       }
@@ -123,17 +123,22 @@ Layers (each an independently runnable/verifiable slice):
 (reason `startup`/`resume`/`reload`) via `ctx.sessionManager.getEntries()`; falls
 back to `defaultMode` then `normal`.
 
-**Switching** (`--pi-mode <name>` flag, `/mode` selector, `/mode <name>`, cycle shortcut):
-1. If leaving a mode with `onExitPrompt` → inject via `pi.sendMessage` (stored).
-2. Update current mode; persist session entry.
-3. If entering a mode with `onEnterPrompt` → inject via `pi.sendMessage`.
-4. Emit `pi-mode:changed` `{ mode, previous, reason: "switch" }`.
-5. Update footer status line.
+**Switching** (`--pi-mode <name>` flag, `/mode` selector, `/mode <name>`, cycle shortcut)
+only changes mode state — it emits no prompt. The mode's prompt attaches to the
+user's next message at send time (see Prompts below):
+1. Update current mode; persist session entry.
+2. Emit `pi-mode:changed` `{ mode, previous, reason: "switch" }`.
+3. Update footer status line.
 
-**Prompts.**
-- `onEnterPrompt`/`onExitPrompt` → visible conversation messages (transcript, one-time).
-- `perTurnPrompt` → appended to **system prompt** in `before_agent_start`
-  (ephemeral, recomputed each turn, survives compaction, never accumulates).
+**Prompts** are prepended to the user's message via the `input` event
+(`{ action: "transform" }`), never the system prompt — appending to the system
+prompt would invalidate its KV-cache prefix every turn. Which prompt(s) attach
+depends on the mode transition since the last sent message:
+- same mode as last message → `perTurnPrompt` (every message while active);
+- mode change (or first message) → `onExitPrompt`(prev) then `onEnterPrompt`(curr);
+- `onEnterPrompt` and `perTurnPrompt` are mutually exclusive.
+On `session_start` resume, `lastSentMode` is seeded to the restored mode so the
+first message gets `perTurnPrompt` rather than re-announcing `onEnterPrompt`.
 
 **Notification.** `pi.events.emit("pi-mode:changed", { mode, previous, reason })`
 on every switch and on `session_start` after restore
