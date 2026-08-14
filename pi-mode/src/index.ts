@@ -99,7 +99,6 @@ export default function piMode(pi: ExtensionAPI): void {
 			return true;
 		}
 		setMode(ctx, name, { reason: "switch", persist: true });
-		ctx.ui.notify(`Switched to ${name} mode`, "info");
 		return true;
 	}
 
