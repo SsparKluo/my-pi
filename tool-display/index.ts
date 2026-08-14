@@ -352,7 +352,7 @@ function bashTimingLine(
 	const duration = formatDuration(end - state.startedAt);
 	const when = formatTimestamp(state.startedAt);
 	const label = isPartial ? "elapsed" : "took";
-	return theme.fg("muted", `${label} ${duration} · ${when}`);
+	return theme.fg("muted", `\uF017 ${label} ${duration} · ${when}`);
 }
 
 /** Expanded bash view: output (+ full command only when call folded it away). */
