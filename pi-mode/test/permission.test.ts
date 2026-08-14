@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PLAN_PERMISSION } from "./plan-permission.ts";
 import {
+	applyExternalPathGate,
 	evaluatePermission,
 	describePath,
 	extractSubject,
@@ -74,6 +75,39 @@ describe("command globs", () => {
 		expect(patternMatches("git status", "git status", "command", cwd)).toBe(true);
 		expect(patternMatches("git status", "git status -sb", "command", cwd)).toBe(false);
 		expect(patternMatches("git diff *", "git diff HEAD", "command", cwd)).toBe(true);
+	});
+});
+
+describe("applyExternalPathGate", () => {
+	const rules = {
+		read: "allow" as const,
+		externalPath: {
+			"*": "ask" as const,
+			"~/.agents/skills/**": "allow" as const,
+		},
+	};
+
+	it("does not change in-project file calls", () => {
+		const base = evaluatePermission(rules, "read", "src/a.ts", cwd);
+		expect(applyExternalPathGate(base, rules, cwd).action).toBe("allow");
+	});
+
+	it("asks for an external path when externalPath says ask", () => {
+		const base = evaluatePermission(rules, "read", "/etc/passwd", cwd);
+		expect(base.action).toBe("allow");
+		expect(applyExternalPathGate(base, rules, cwd).action).toBe("ask");
+	});
+
+	it("allows a configured external directory", () => {
+		const subject = `${process.env.HOME}/.agents/skills/foo`;
+		const base = evaluatePermission(rules, "read", subject, cwd);
+		expect(applyExternalPathGate(base, rules, cwd).action).toBe("allow");
+	});
+
+	it("is a no-op when externalPath is not configured", () => {
+		const onlyRead = { read: "allow" as const };
+		const base = evaluatePermission(onlyRead, "read", "/etc/passwd", cwd);
+		expect(applyExternalPathGate(base, onlyRead, cwd).action).toBe("allow");
 	});
 });
 

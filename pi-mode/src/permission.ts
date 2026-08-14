@@ -3,7 +3,9 @@ import { isAbsolute, join, normalize, relative } from "node:path";
 import { minimatch } from "minimatch";
 import type { Action, PermissionRules, SurfaceRule } from "./config.ts";
 
-const FILE_SURFACES = new Set(["read", "write", "edit", "grep", "find", "ls", "path"]);
+const FILE_SURFACES = new Set(["read", "write", "edit", "grep", "find", "ls", "externalPath"]);
+
+const ACTION_RANK: Record<Action, number> = { deny: 3, ask: 2, classify: 2, allow: 1 };
 
 const MINIMATCH_OPTS = { dot: true, nocomment: true } as const;
 
@@ -149,6 +151,25 @@ export function evaluatePermission(
 		return { action: "deny", surface, pattern: null, subject, kind };
 	}
 	return { action: hit.action, surface, pattern: hit.pattern, subject, kind };
+}
+
+/**
+ * Extra gate for file calls that leave the project.
+ * Only runs when `externalPath` is configured; in-project paths are unchanged.
+ * Most-restrictive wins against the tool-surface verdict.
+ */
+export function applyExternalPathGate(
+	base: PermissionVerdict,
+	rules: PermissionRules | undefined,
+	cwd: string,
+): PermissionVerdict {
+	if (!rules || !Object.hasOwn(rules, "externalPath")) return base;
+	if (base.kind !== "path") return base;
+	if (!describePath(base.subject, cwd).external) return base;
+	const ext = evaluatePermission(rules, "externalPath", base.subject, cwd);
+	return (ACTION_RANK[ext.action] ?? 0) > (ACTION_RANK[base.action] ?? 0)
+		? { ...ext, surface: base.surface, subject: base.subject, kind: base.kind }
+		: base;
 }
 
 /** True when every possible call on this surface is deny (hide the tool). */
