@@ -13,9 +13,9 @@ import { getConfigPath, loadConfig, type Action, type PiModeConfig } from "./con
 import {
 	evaluatePermission,
 	extractSubject,
+	reconcileTools,
 	SessionApprovals,
 	subjectKind,
-	visibleTools,
 } from "./permission.ts";
 
 const STATE_ENTRY = "pi-mode-state";
@@ -33,6 +33,7 @@ export default function piMode(pi: ExtensionAPI): void {
 	const approvals = new SessionApprovals();
 	const classifyCache = new Map<string, Action>();
 	let agentsMd = "";
+	let hiddenTools: string[] = [];
 
 	pi.registerFlag("pi-mode", {
 		description: "Start in a specific pi-mode (e.g. --pi-mode plan)",
@@ -88,8 +89,14 @@ export default function piMode(pi: ExtensionAPI): void {
 	}
 
 	function applyToolsForMode(name: string): void {
-		const catalog = pi.getAllTools().map((t) => t.name);
-		pi.setActiveTools(visibleTools(config.modes[name]?.permission, catalog));
+		const next = reconcileTools(
+			config.modes[name]?.permission,
+			pi.getAllTools().map((t) => t.name),
+			pi.getActiveTools(),
+			hiddenTools,
+		);
+		hiddenTools = next.hidden;
+		pi.setActiveTools(next.active);
 	}
 
 	function switchTo(ctx: ExtensionContext, name: string): boolean {

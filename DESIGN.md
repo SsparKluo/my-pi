@@ -145,6 +145,9 @@ on every switch and on `session_start` after restore
 Flat format (surfaces × actions, last-match-wins), evaluated in `permission.ts`.
 Two-phase gating:
 1. `before_agent_start` — globally-denied tools are **hidden** from the model.
+   Candidates are the current active set plus tools we hid earlier — never the
+   full catalog, so `--tools` / `/tools` stays intact. Late-registered tools
+   that land in the active set are re-filtered each turn.
 2. `tool_call` — gate the call:
    - resolve the surface (read/write/edit/grep/find/ls/bash/tool).
    - file-bearing surfaces → match the **path** against path globs (plan's

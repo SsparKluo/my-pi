@@ -5,6 +5,7 @@ import {
 	extractSubject,
 	isSurfaceGloballyDenied,
 	patternMatches,
+	reconcileTools,
 	SessionApprovals,
 	visibleTools,
 } from "../src/permission.ts";
@@ -154,6 +155,33 @@ describe("tool hiding", () => {
 
 	it("leaves tools untouched when the mode has no permission block", () => {
 		expect(visibleTools(undefined, ["read", "write"])).toEqual(["read", "write"]);
+	});
+
+	it("does not pull disabled catalog tools back when entering a permission mode", () => {
+		const next = reconcileTools({ write: "deny", "*": "allow" }, ["read", "write", "bash"], ["read", "bash"], []);
+		expect(next.active).toEqual(["read", "bash"]);
+		expect(next.hidden).toEqual([]);
+	});
+
+	it("hides a newly-active globally-denied tool and restores only what we hid", () => {
+		const denied = reconcileTools(
+			{ write: "deny", "*": "allow" },
+			["read", "write", "bash"],
+			["read", "write", "bash"],
+			[],
+		);
+		expect(denied.active).toEqual(["read", "bash"]);
+		expect(denied.hidden).toEqual(["write"]);
+
+		const restored = reconcileTools(undefined, ["read", "write", "bash"], denied.active, denied.hidden);
+		expect(restored.active).toEqual(["read", "bash", "write"]);
+		expect(restored.hidden).toEqual([]);
+	});
+
+	it("drops tools that left the catalog and keeps user-disabled tools disabled", () => {
+		const next = reconcileTools(undefined, ["read", "write"], ["read"], ["write", "gone"]);
+		expect(next.active).toEqual(["read", "write"]);
+		expect(next.hidden).toEqual([]);
 	});
 });
 

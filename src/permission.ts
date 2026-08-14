@@ -143,6 +143,33 @@ export function visibleTools(rules: PermissionRules | undefined, toolNames: stri
 	return toolNames.filter((name) => !isSurfaceGloballyDenied(rules, name));
 }
 
+/**
+ * Recompute the active tool set without using the full catalog as a baseline.
+ * Candidates are (active ∪ previously-hidden) ∩ catalog. Permission modes
+ * hide globally-denied tools; leaving those modes restores only what we hid.
+ */
+export function reconcileTools(
+	rules: PermissionRules | undefined,
+	catalog: string[],
+	active: string[],
+	hidden: string[],
+): { active: string[]; hidden: string[] } {
+	const known = new Set(catalog);
+	const candidate: string[] = [];
+	const seen = new Set<string>();
+	for (const name of [...active, ...hidden]) {
+		if (!known.has(name) || seen.has(name)) continue;
+		seen.add(name);
+		candidate.push(name);
+	}
+	if (!rules) {
+		return { active: candidate, hidden: [] };
+	}
+	const next = visibleTools(rules, candidate);
+	const nextSet = new Set(next);
+	return { active: next, hidden: candidate.filter((name) => !nextSet.has(name)) };
+}
+
 export class SessionApprovals {
 	private readonly entries: { surface: string; pattern: string }[] = [];
 
