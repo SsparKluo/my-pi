@@ -101,9 +101,9 @@ function statusDot(theme: Theme, chrome: CallChrome = {}): string {
 		return theme.fg("error", "●");
 	}
 	if (chrome.isPartial) {
-		return theme.fg("warning", "●");
+		return theme.fg("muted", "●");
 	}
-	return theme.fg("success", "●");
+	return theme.fg("accent", "●");
 }
 
 /**
