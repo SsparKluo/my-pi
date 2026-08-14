@@ -41,9 +41,9 @@ Shipped mode:
 
 | Mode | Behavior |
 |------|----------|
-| **default** | Vanilla pi — no permission block, no prompts |
+| **default** | No prompts. In-workspace tools allowed (except reading `.env`). bash-classify: `READONLY` + `LOCAL_EFFECTS` allow, else ask. |
 
-`plan` and `auto` are commented examples in the config template, not built-in modes. Copy them into `modes` to enable.
+Omit `permission` for vanilla pi. Extra modes (`plan`, `auto`, …) are yours to add.
 
 The current mode (when not `default`) is published via `ctx.ui.setStatus("pi-mode", …)` so a custom footer (e.g. my-pi's status extension) can render it. Mode changes also emit `pi-mode:changed` `{ mode, previous, reason }` (`reason` ∈ `startup`/`resume`/`reload`/`switch`).
 
@@ -94,14 +94,16 @@ to the in-memory default (`default` mode, no permission).
 }
 ```
 
-- **surfaces**: `bash`, `read`, `write`, `edit`, `grep`, `find`, `ls`, `path`,
+- **surfaces**: `bash`, `read`, `write`, `edit`, `grep`, `find`, `ls`, `externalPath`,
   `*` (catch-all for unknown/extension tools).
-- **actions**: `allow` | `deny` | `ask` | `classify`.
+- **actions**: `allow` | `deny` | `ask` | `classify` (`classify` → bash-classify, then the small
+  model for classes mapped to `classify`). Per-mode `classify.verdicts` chooses whether the
+  model may answer `ask` (omit it for hands-off auto). Later bash patterns still overwrite.
 - **value forms**:
   - string → single action for the whole surface (e.g. `"read": "allow"`).
   - object → pattern→action map, **last-match-wins** (put general rules first,
     specific overrides later). For `bash`/tools, patterns are command-prefix
-    globs (`"git push *"`, `"*"`, `"ls"`); for `write`/`edit`/`path`/file reads,
+    globs (`"git push *"`, `"*"`, `"ls"`); for `write`/`edit`/`externalPath`/file reads,
     patterns are **file-path globs** (`"**/*.md"`, `"*"`).
 
 Path globs use minimatch (`dot`, `nocomment`). `**/*.md` matches a top-level

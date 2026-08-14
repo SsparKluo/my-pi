@@ -11,9 +11,9 @@ permission policy, prompts injected on enter/exit/per-turn, and (optionally) an
 AI bash classifier.
 
 - Modes are **config-defined** (arbitrary set, not a hardcoded enum).
-  Ship a single **`default`** mode with no `permission` block — identical to
-  vanilla pi. Commented `plan` / `auto` examples live in the JSONC template
-  for copy-paste (read-only `*.md` writes + bash allowlist; bash classifier).
+  Ship a single **`default`** mode in the written template: no prompts, in-workspace
+  tools allowed (except reading `.env`), bash via bash-classify (`READONLY` +
+  `LOCAL_EFFECTS` allow, else ask). Omit `permission` for vanilla pi.
 - **Everything configurable**: permission rules, prompts, classifier model,
   command wrappers, thresholds.
 - Config file: **`~/.pi/agent/pi-mode-config.jsonc`** (JSONC, inside the agent
@@ -23,7 +23,9 @@ AI bash classifier.
 - **Notify other components on mode change** (and at startup) so UI components
   can render based on the mode.
 - **Permission control is optional per mode** — a mode may do prompt-injection
-  only (omit the `permission` block).
+  only (omit the `permission` block). `default` without `permission` is vanilla
+  pi. Other modes inherit `default`'s rules (or all-allow if it has none), then
+  overwrite listed surfaces / patterns.
 - **Bash is parsed via `unbash` (AST)** before any AI classification.
 - Standalone (no third-party permission package); adopt the flat permission
   *format* from `@gotgenes/pi-permission-system`.
@@ -38,7 +40,7 @@ AI bash classifier.
 | Q3 | `permission` block optional (omit → prompt-only). `classify` is a first-class action. Global `commandWrappers`. |
 | Q4 | Three optional prompt fields emitted as their own block at send time (never the system prompt — that would bust the KV-cache prefix): `onEnterPrompt`/`onExitPrompt` on a mode change (displayed as a compact label), `perTurnPrompt` while staying in a mode (invisible, model-only). State persisted via session entry. |
 | Q5 | Broadcast `pi-mode:changed` event + footer status line + session-entry-readable. UX: `--pi-mode` flag, `/mode` command + selector, cycle shortcut. No service accessor yet. |
-| Q6 | Classifier via `modelRegistry.complete`; per-unit classify, most-restrictive-wins; deny-floor before classifier; `fallback: deny`; session cache; `wholeCommandThreshold`. |
+| Q6 | `classify` uses bash-classify by default (risk/class → allow/ask/deny). Explicit bash patterns still win (last-match-wins). `engine: "model"` keeps the old LLM classifier. |
 | Q7 | Ask dialog = custom TUI (`ctx.ui.custom`); codeblock, foldable, max-height internal scroll; session approvals record the matched pattern; fail-closed non-interactive deny. |
 | §38 | `unbash` parses bash to AST before classification. |
 | §47 | Transparent wrappers (`rtk`, …) stripped; hiding wrappers (`eval`, `sudo`, …) → fail-closed ask. |
@@ -77,14 +79,14 @@ See `config/config.example.jsonc` for the shipped (commented) template.
 }
 ```
 
-- **surfaces**: `bash`, `read`, `write`, `edit`, `grep`, `find`, `ls`, `path`,
+- **surfaces**: `bash`, `read`, `write`, `edit`, `grep`, `find`, `ls`, `externalPath`,
   `*` (catch-all for unknown/extension tools).
 - **actions**: `allow` | `deny` | `ask` | `classify`.
 - **value forms**:
   - string → single action for the whole surface (e.g. `"read": "allow"`).
   - object → pattern→action map, **last-match-wins** (put general rules first,
     specific overrides later). For `bash`/tools, patterns are command-prefix
-    globs (`"git push *"`, `"*"`, `"ls"`); for `write`/`edit`/`path`/file reads,
+    globs (`"git push *"`, `"*"`, `"ls"`); for `write`/`edit`/`externalPath`/file reads,
     patterns are **file-path globs** (`"**/*.md"`, `"*"`).
 
 > Path globs use minimatch (`dot`, `nocomment`). `**/*.md` matches a top-level

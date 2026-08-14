@@ -171,7 +171,7 @@ Global only — no project-level file. All keys optional; invalid fields fall ba
 
 **What it does.** Mode-switcher: permission policy + enter/exit/per-turn prompts + optional AI bash classifier. State persists per session.
 
-Out of the box there is a single **`default`** mode with no `permission` block — same as vanilla pi, no gating. `plan` / `auto` are commented examples in the template, not shipped modes.
+Out of the box there is a single **`default`** mode: no prompts, in-workspace tools allowed (except reading `.env`), bash via bash-classify (`READONLY` + `LOCAL_EFFECTS` allow, else ask). Omit `permission` for vanilla pi.
 
 ### Config: `~/.pi/agent/pi-mode-config.jsonc`
 
@@ -182,15 +182,27 @@ JSONC (comments + trailing commas). Lives in the agent dir (respects `PI_AGENT_D
   "defaultMode": "default",
   "modes": {
     "default": {
-      // omit permission / prompts for vanilla pi
+      "onEnterPrompt": null,
+      "onExitPrompt": null,
+      "perTurnPrompt": null,
+      "classify": {
+        "byClass": {
+          "READONLY": "allow",
+          "LOCAL_EFFECTS": "allow",
+          "EXTERNAL_EFFECTS": "ask",
+          "DANGEROUS": "ask",
+          "UNKNOWN": "ask"
+        }
+      },
+      "permission": {
+        "*": "allow",
+        "read": { "*": "allow", "*.env": "ask", "*.env.*": "ask", "*.env.example": "allow" },
+        "externalPath": "ask",
+        "bash": "classify"
+      }
     }
   }
 }
-
-/*
-Copy into "modes" to add your own. plan / auto examples live in
-pi-mode/config/config.example.jsonc (and in the auto-created file).
-*/
 ```
 
 | Field | Meaning |
@@ -209,7 +221,7 @@ pi-mode/config/config.example.jsonc (and in the auto-created file).
 | `classifier.prompt` | Override classifier system prompt (`null` = built-in) |
 | `ask.maxBlockHeight` | Max visible lines of the command body in the ask dialog |
 
-**Permission surfaces:** `bash`, `read`, `write`, `edit`, `grep`, `find`, `ls`, `path`, `*` (catch-all).
+**Permission surfaces:** `bash`, `read`, `write`, `edit`, `grep`, `find`, `ls`, `externalPath`, `*` (catch-all).
 
 **Actions:** `allow` | `deny` | `ask` | `classify` (bash → AI classifier).
 
