@@ -164,18 +164,26 @@ export default function piMode(pi: ExtensionAPI): void {
 		return parts.length > 0 ? parts.join("\n\n") : undefined;
 	}
 
-	// Attach mode prompts to the user's message at send time. NEVER inject into
-	// the system prompt — that would invalidate the KV-cache prefix every turn.
+	// Emit the mode prompt as its own displayed block at send time — separate
+	// from the user's message and NEVER in the system prompt (appending there
+	// would invalidate the KV-cache prefix every turn). sendMessage appends the
+	// block during the input event, before the user message is committed, so it
+	// precedes the user message in both the transcript and the model context.
 	pi.on("input", async (event) => {
 		if (event.streamingBehavior) return; // only fresh messages, not mid-stream steers
 		const prompt = promptForMessage();
 		lastSentMode = currentMode;
 		if (prompt) {
-			return { action: "transform", text: `${prompt}\n\n${event.text}`, images: event.images };
+			pi.sendMessage(
+				{ customType: "pi-mode-prompt", content: prompt, display: true, details: { mode: currentMode } },
+				{ triggerTurn: false },
+			);
 		}
+		// Returning void lets the user's message proceed unchanged.
 	});
 
-	// Reconcile tools each turn (mode prompts travel with the user message, not here).
+	// Reconcile tools each turn (mode prompts are emitted as a block via the
+	// input event, not here — and never the system prompt).
 	pi.on("before_agent_start", async (event) => {
 		agentsMd = collectAgentsMd(event.systemPromptOptions?.contextFiles);
 		if (currentMode) applyToolsForMode(currentMode);
