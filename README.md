@@ -173,6 +173,14 @@ Global only — no project-level file. All keys optional; invalid fields fall ba
 
 Out of the box there is a single **`default`** mode: no prompts, in-workspace tools allowed (except reading `.env`), bash via bash-classify (`READONLY` + `LOCAL_EFFECTS` allow, else ask). Omit `permission` for vanilla pi.
 
+**bash-classify dependency.** The `classify` action shells out to the `bash-classify` CLI (stdin → JSON):
+
+```bash
+uv tool install bash-classify      # or: uvx --from bash-classify bash-classify
+```
+
+Custom command via `bashClassify.command`. If the CLI is missing or fails, grading falls back to `bashClassify.fallback` (default `ask`), never silently allows.
+
 ### Config: `~/.pi/agent/pi-mode-config.jsonc`
 
 JSONC (comments + trailing commas). Lives in the agent dir (respects `PI_AGENT_DIR`). **Created automatically** on first load if missing, as a commented template you can copy from.

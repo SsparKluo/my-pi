@@ -45,6 +45,16 @@ Shipped mode:
 
 Omit `permission` for vanilla pi. Extra modes (`plan`, `auto`, …) are yours to add.
 
+**bash-classify dependency.** The `classify` action shells out to the `bash-classify` CLI:
+
+```bash
+uv tool install bash-classify
+```
+
+Custom command via `bashClassify.command`. If the CLI is missing or fails, grading falls
+back to `bashClassify.fallback` (default `ask`), never silently allows. Units mapped to
+`model` go to the small LLM (`model.model`, with `model.fallbackModels` as the retry chain).
+
 The current mode (when not `default`) is published via `ctx.ui.setStatus("pi-mode", …)` so a custom footer (e.g. my-pi's status extension) can render it. Mode changes also emit `pi-mode:changed` `{ mode, previous, reason }` (`reason` ∈ `startup`/`resume`/`reload`/`switch`).
 
 Inside [herdr](https://herdr.sh), a non-`default` mode is reported as the agents-panel
