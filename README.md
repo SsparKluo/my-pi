@@ -4,143 +4,262 @@ A collection of [pi](https://pi.dev) extensions for an enhanced coding experienc
 
 ![Screenshot](https://github.com/user-attachments/assets/e8766ffd-3ff5-474b-a876-3b8f78bfd069)
 
-## Quick Start
-
-### Install with pi (recommended)
+## Install
 
 ```bash
 pi install https://github.com/SsparKluo/my-pi
 ```
 
-(`git:github.com/SsparKluo/my-pi` is equivalent.) pi clones the repo into `~/.pi/agent/git/github.com/SsparKluo/my-pi` and records the source in your `settings.json` (`packages`). The extensions listed in the package manifest (`package.json` → `pi.extensions`) are loaded on the next startup — no manual copying, and **no filename conflicts**: the package lives in its own directory, fully separate from `~/.pi/agent/extensions/`.
+Then `/reload`. Update later with `pi update` (or `pi update https://github.com/SsparKluo/my-pi`).
 
-Then reload pi:
-
-```
-/reload
-```
-
-Update later with `pi update` (all packages) or `pi update https://github.com/SsparKluo/my-pi`.
-
-How it shows up in pi:
-
-- `pi list` → the source string you installed (`https://github.com/SsparKluo/my-pi` or `git:github.com/SsparKluo/my-pi`) with install path `~/.pi/agent/git/github.com/SsparKluo/my-pi`
-- loaded-resources panel (compact labels) → `SsparKluo/my-pi:editor.ts`, `SsparKluo/my-pi:status`
-
-> [!NOTE]
-> The git clone is managed by pi — updating runs `git clean -fdx` + `git pull`, so **don't edit files inside `~/.pi/agent/git/`**. Keep personal customizations in `~/.pi/agent/extensions/` (loaded alongside packages).
-
-### Legacy — migrating from manual setup
-
-Previously this collection was installed by copying files into `~/.pi/agent/extensions/`. To migrate to the recommended install:
-
-```bash
-pi install https://github.com/SsparKluo/my-pi
-```
-
-Then remove the manual copies from `~/.pi/agent/extensions/` (the ones that exist in the package), and run `/reload`.
-
-> [!WARNING]
-> If you keep both, the same extensions load twice — duplicate patches, first-wins tool registration.
+pi clones into `~/.pi/agent/git/github.com/SsparKluo/my-pi` and loads every entry in `package.json` → `pi.extensions`. **Don't edit files inside that clone** — `pi update` runs `git clean -fdx` + `git pull` and will wipe local edits. Personal overrides go in `~/.pi/agent/extensions/`.
 
 <details>
-<summary>Archived: old manual setup (deprecated — for reference only)</summary>
+<summary>Legacy manual install / migration</summary>
 
 ```bash
-git clone https://github.com/SsparKluo/my-pi.git /tmp/pi-extensions
-cp -r /tmp/pi-extensions/*.ts ~/.pi/agent/extensions/
-cp -r /tmp/pi-extensions/status/ ~/.pi/agent/extensions/status/
+pi install https://github.com/SsparKluo/my-pi
+# then remove any old copies from ~/.pi/agent/extensions/ and /reload
 ```
 
-> [!WARNING]
-> Check for filename conflicts. If you already have an extension with the same name in `~/.pi/agent/extensions`, **rename the incoming files** (e.g., `collapse-tools.new.ts`) rather than overwriting your existing ones.
+Keeping both the package and manual copies loads the same extensions twice.
 
 </details>
 
-## Extensions
-
-### status
-
-A status display split across three zones: an identity **header** above the editor, a context/usage **footer** below it, and a per-turn **"Worked for"** line.
-
-| Module | Description |
-|--------|-------------|
-| **index.ts** | Entry point. Renders the footer (Magic Context usage + state, pi token stats, cumulative cache hit rate) and the post-turn "Worked for" line (duration + TPS + TTFT + last-request cache rate). Orchestrates the other modules. |
-| **header.ts** | Identity header above the editor — model + thinking level, working directory, git branch. Also hosts the `/statusline` config items and the token-stats / cache-rate helpers. |
-| **git.ts** | Git status detection — branch name, ahead/behind counts, staged/modified/deleted/conflicted/untracked file counts |
-| **tps.ts** | Token-speed engine — end-to-end TPS (provider output tokens / full-turn wall time, computed once at `finish()`) and TTFT (HTTP request → first token). No live estimate. |
-| **title.ts** | Animated terminal title with a braille spinner during agent activity |
-| **statusline.ts** | `/statusline` command for interactively toggling which items appear across the three zones |
-
-**Files:** `status/index.ts`, `status/header.ts`, `status/git.ts`, `status/tps.ts`, `status/title.ts`, `status/statusline.ts`
-
 ---
 
-### startup-header
+## Where to configure what
 
-A [pi-cc-header](https://github.com/eriiic7z/pi-cc-header)–style startup header for pi: an **animated pixel-art Pi logo** on the left (Clawd crab red, 4-level gradient + IBM stripes, 14-frame animation) with a compact info panel on the right. Stripped to essentials — no model/effort line, no slogan, no config commands.
+Every config file is optional. Missing files → built-in defaults (pi-mode writes a commented template on first load).
+
+| What you want to change | File | Scope | Also via |
+|-------------------------|------|-------|----------|
+| Footer / "Worked for" toggles | `~/.pi/agent/statusline-config.json` | global | `/statusline` |
+| Auto-title model | `~/.pi/agent/settings.json` → `"smallModel"` | global | — |
+| System prompt | `~/.pi/agent/system-prompt.json` | global | — |
+| System prompt (project) | `<project>/.pi/system-prompt.json` | project (trusted only) | — |
+| Tool call/result rendering | `~/.pi/agent/tool-display.json` | global only | — |
+| Modes / permissions / classifier | `~/.pi/agent/pi-mode-config.jsonc` | global | `/mode`, `--pi-mode` |
+| 429 retry on/off & fixed wait | — | session | `/429-retry` |
+| Quiet native startup panel | `~/.pi/agent/settings.json` → `"quietStartup"` | global | header `ctrl+o` |
 
 ```
-  [pixel Pi logo]   Pi v0.x
-                    2 context | 0·0 skills | 14 extensions | 0 prompts
-                    ~/your/cwd
-                    Press ctrl+o to show full startup help and loaded resources.
+~/.pi/agent/                        # pi agent dir (PI_AGENT_DIR)
+├── settings.json                   # smallModel, quietStartup, packages, …
+├── statusline-config.json          # status toggles
+├── system-prompt.json              # system-prompt (global)
+├── tool-display.json               # tool-display
+├── pi-mode-config.jsonc            # pi-mode
+└── requests/                       # request-logger output
+
+<project>/
+└── .pi/
+    └── system-prompt.json          # system-prompt (project; trusted only)
 ```
 
-- **Counts** — context files (`AGENTS`/`CLAUDE` + `SYSTEM` + `APPEND_SYSTEM`), skills as **global·local** (pkg merged into global), extensions, prompts; items separated by `|`. Best-effort filesystem scan mirroring pi's own discovery rules.
-- **ctrl+o** — sets `quietStartup` in `~/.pi/agent/settings.json` to hide pi's verbose native loaded-resources panel, then expands the header to show the detailed loaded-resources breakdown (context files, skills by scope, extensions, prompts). Restore the native panel with `"quietStartup": false`.
+---
 
-**File:** `startup-header.ts`
+## status — footer & "Worked for"
+
+**What it does.** Replaces pi's built-in footer and appends a per-turn "Worked for" line to the conversation stream.
+
+| Zone | Contents |
+|------|----------|
+| Footer line 1 | Model + thinking, cwd, git, active pi-mode (if not `normal`) |
+| Footer line 2 | Magic Context status + cumulative tokens + cache hit rate |
+| "Worked for" | Duration, TPS, TTFT, last-request cache rate, per-turn tokens |
+
+### Config: `~/.pi/agent/statusline-config.json`
+
+Written automatically by `/statusline`. All fields default `true`:
+
+```json
+{
+  "model": true,
+  "thinking": true,
+  "currentDir": true,
+  "gitBranch": true,
+  "tokenStats": true,
+  "cacheRate": true,
+  "tokenUsage": true,
+  "tokenSpeed": true,
+  "ttft": true
+}
+```
+
+| Field | Controls |
+|-------|----------|
+| `model`, `thinking` | Footer line 1 — model + thinking level |
+| `currentDir`, `gitBranch` | Footer line 1 — cwd + git branch/dirty counts |
+| `tokenStats`, `cacheRate` | Footer line 2 — cumulative tokens + cache hit rate |
+| `tokenUsage`, `tokenSpeed`, `ttft` | "Worked for" — per-turn usage / TPS / TTFT |
+| `cacheRate` | Also on "Worked for" as last-request cache rate |
+
+### Config: `~/.pi/agent/settings.json` → `smallModel` (auto-title)
+
+After the first completed agent turn, status generates a short session title. Prefer a cheap model:
+
+```json
+{
+  "smallModel": "anthropic/claude-haiku-4-5"
+}
+```
+
+Syntax: `provider/modelId[:thinkingLevel]`. Valid levels: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Use `:off` to disable reasoning (not `:none`). Falls back to the active session model when absent or unauthenticated.
+
+### Commands
+
+| Command | Effect |
+|---------|--------|
+| `/statusline` | Interactive toggles (saves to `statusline-config.json`) |
+| `/generate-title` | Force-regenerate the session title from the full conversation |
+
+### Cross-extension status keys (read, not configured)
+
+Footer line 1/2 also surface other extensions' `ctx.ui.setStatus` values:
+
+- `pi-mode` — e.g. `⏸ plan`, `⚡ auto`
+- `magic-context` — usage / state string
 
 ---
 
-### editor
+## tool-display — tool call/result chrome
 
-- **Mode-colored border** — the `─` border is recolored by input mode: `!` → bashMode, `!!` → dim (matching the corresponding history blocks); plain input uses dim (the footer's token-stat color). The editor itself is pi's native input box.
-- **Skill mentions** — `$skill` mentions render bold in the theme accent; typing `$` opens the mention picker with all indexed skills (agents, codex, claude, pi); unknown `$tokens` are left untouched.
+**What it does.** Overrides rendering for `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, `ffgrep`, `fffind`. Adaptive edit diffs, fuller bash expand, muted chrome. Does **not** touch user-message rendering.
 
-**File:** `editor.ts`
+### Config: `~/.pi/agent/tool-display.json`
+
+Global only — no project-level file. All keys optional; invalid fields fall back to defaults:
+
+```json
+{
+  "bashPreviewLines": 5,
+  "bashCallPreviewLines": 6,
+  "bashRevealCommand": true,
+  "diffMode": "auto",
+  "diffColumnWidth": 100,
+  "diffSyntaxHighlight": false,
+  "paddingX": 1,
+  "enabled": {
+    "read": true,
+    "write": true,
+    "edit": true,
+    "bash": true,
+    "grep": true,
+    "find": true,
+    "ls": true,
+    "ffgrep": true,
+    "fffind": true
+  }
+}
+```
+
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `bashPreviewLines` | `5` | Tail lines shown for a collapsed bash result |
+| `bashCallPreviewLines` | `6` | Max command lines on the call; extras fold as `… (N lines)` |
+| `bashRevealCommand` | `true` | On Ctrl+O expand, show the full command above the output |
+| `diffMode` | `"auto"` | `"auto"` \| `"single"` \| `"dual"` |
+| `diffColumnWidth` | `100` | Width at which `"auto"` switches to side-by-side |
+| `diffSyntaxHighlight` | `false` | Highlight diff context via pi's built-in `highlightCode` |
+| `paddingX` | `1` | Left padding (spaces) on every tool-block line |
+| `enabled.<tool>` | `true` | `false` = keep pi's built-in renderer for that tool |
 
 ---
 
-### request-logger
+## pi-mode — modes, permissions, bash classifier
 
-Logs every provider request to `~/.pi/agent/requests/<session>.request.log` — HTTP status, headers, token counts, model info — with sensitive query parameters sanitized.
+**What it does.** Mode-switcher: permission policy + enter/exit/per-turn prompts + optional AI bash classifier. State persists per session.
 
-**File:** `request-logger.ts`
+Out of the box there is a single **`default`** mode with no `permission` block — same as vanilla pi, no gating. `plan` / `auto` are commented examples in the template, not shipped modes.
+
+### Config: `~/.pi/agent/pi-mode-config.jsonc`
+
+JSONC (comments + trailing commas). Lives in the agent dir (respects `PI_AGENT_DIR`). **Created automatically** on first load if missing, as a commented template you can copy from.
+
+```jsonc
+{
+  "defaultMode": "default",
+  "modes": {
+    "default": {
+      // omit permission / prompts for vanilla pi
+    }
+  }
+}
+
+/*
+Copy into "modes" to add your own. plan / auto examples live in
+pi-mode/config/config.example.jsonc (and in the auto-created file).
+*/
+```
+
+| Field | Meaning |
+|-------|---------|
+| `defaultMode` | Startup mode when no flag / no persisted session state |
+| `commandWrappers` | Transparent prefixes stripped before bash eval (`time ls` → `ls`) |
+| `modes.<name>.onEnterPrompt` | Emitted (compact label) on first message after entering |
+| `modes.<name>.onExitPrompt` | Emitted (compact label) on first message after leaving |
+| `modes.<name>.perTurnPrompt` | Emitted every turn while in the mode (invisible, model-only) |
+| `modes.<name>.permission` | Optional. Omit = prompt-only mode. Surfaces × actions (below) |
+| `classifier.model` | Model for `classify` actions (`provider/modelId`) |
+| `classifier.verdicts` | Allowed classifier answers (default `allow`/`deny`) |
+| `classifier.fallback` | Used on error / unparseable (default `deny`) |
+| `classifier.cache` | Per-session cache of classify results |
+| `classifier.wholeCommandThreshold` | If more units need classify than this, classify the whole command |
+| `classifier.prompt` | Override classifier system prompt (`null` = built-in) |
+| `ask.maxBlockHeight` | Max visible lines of the command body in the ask dialog |
+
+**Permission surfaces:** `bash`, `read`, `write`, `edit`, `grep`, `find`, `ls`, `path`, `*` (catch-all).
+
+**Actions:** `allow` | `deny` | `ask` | `classify` (bash → AI classifier).
+
+**Value forms:** a string applies to the whole surface (`"read": "allow"`); an object is a pattern→action map, **last-match-wins**. Bash/tool patterns are command-prefix globs (`"git push *"`); write/edit/path patterns are file-path globs (`"**/*.md"`). Modes are config-defined — add your own freely.
+
+> Prompts are **never** injected into the system prompt (that would bust the KV-cache). They ride as a separate conversation message before the user turn.
+
+Full design (bash cascade, ask keybinds, classifier context): [`pi-mode/README.md`](pi-mode/README.md) · [`pi-mode/DESIGN.md`](pi-mode/DESIGN.md) · template: [`pi-mode/config/config.example.jsonc`](pi-mode/config/config.example.jsonc).
+
+### Runtime controls (not config files)
+
+| Surface | Effect |
+|---------|--------|
+| `/mode` | Interactive selector |
+| `/mode <name>` | Switch to a named mode |
+| `Ctrl+Shift+M` | Cycle modes |
+| `--pi-mode <name>` | Start pi already in that mode |
 
 ---
 
-### shortcuts
+## system-prompt — managed system prompt
 
-`Ctrl+Shift+C` copies the current editor content to the system clipboard.
+**What it does.** Builds a configurable system prompt while keeping Pi's own resource discovery (AGENTS, skills, tools).
 
-**File:** `shortcuts.ts`
+### Config: two files, merged
 
----
+| Path | When read |
+|------|-----------|
+| `~/.pi/agent/system-prompt.json` | Always (global) |
+| `<cwd>/.pi/system-prompt.json` | Only after Pi trusts the project |
 
-### system-prompt
+**Merge rules**
 
-Builds a configurable system prompt while keeping Pi's resource discovery intact.
-
-**File:** `system-prompt.ts`
-
-Configuration is read from:
-
-- `~/.pi/agent/system-prompt.json`
-- `.pi/system-prompt.json` in the trusted project
-
-The project config overrides the global `basePrompt`. Tool entries are merged by name, with project entries overriding global entries.
+- `basePrompt` — project wins if set, else global
+- `general` — concatenate (global then project)
+- `tools` — merge by name; project entry overrides global entry of the same name
+- Neither file exists → extension short-circuits, Pi's prompt untouched
 
 ```json
 {
   "basePrompt": "You are a focused coding assistant. Follow the user's request and use the available tools when needed.",
+  "general": [
+    "Be concise in your responses.",
+    "Show file paths clearly when working with files."
+  ],
   "tools": {
     "read": {
       "snippet": "Read file contents.",
       "guidelines": [
-        "Read the relevant files before editing them.",
-        "Use this tool when you need exact file contents."
+        "Read the relevant files before editing them."
       ]
     },
     "bash": {
@@ -153,50 +272,100 @@ The project config overrides the global `basePrompt`. Tool entries are merged by
 }
 ```
 
-The generated section is shaped like this:
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `basePrompt` | no | Persona / base text. Non-empty → **replace** Pi's whole default prefix with the managed prompt. Empty/absent → only swap the available-tools block (+ inject general). |
+| `general` | no | `string[]` → `<general_guidelines>` |
+| `tools.<name>.snippet` | yes (per tool) | One-line description in `<tool_use>` (must be non-empty) |
+| `tools.<name>.guidelines` | yes (per tool) | `string[]` of per-tool preferences (may be empty `[]`) |
+
+**Guideline principle.** Tool schema `description` fields are always sent via the API `tools` param regardless of the system prompt. Put only what the schema does **not** say in `guidelines` (preferences, workflows, discipline) — restating schema text wastes tokens.
+
+### What gets assembled (when `basePrompt` is set)
 
 ```text
-<tool-use>
-- read: Read file contents.
-  - Read the relevant files before editing them.
-  - Use this tool when you need exact file contents.
-- bash: Run shell commands.
-  - Prefer rg for searching files.
+{basePrompt}
 
-In addition to the tools above, you may have access to other custom tools depending on the project.
-</tool-use>
+<general_guidelines>
+- …
+</general_guidelines>
+
+<tool_use>
+- read: …
+  - …
+</tool_use>
+
+<env>
+  Working directory: …
+  Workspace root folder: …
+  Is directory a git repo: yes|no
+  Platform: …
+</env>
+
+<global_instruction>…</global_instruction>     ← AGENTS/CLAUDE under agent dir
+<project_instruction>…</project_instruction>     ← AGENTS/CLAUDE under project
+<available_skills>…</available_skills>           ← Pi's skill formatter (if read is enabled)
 ```
 
-`basePrompt` is the configurable base section. The plugin then adds the configured `<tool-use>` section (one entry per enabled tool with its snippet and per-tool guidelines), the `<general>` section for cross-cutting guidelines, an opencode-style `<env>` block (working directory, git worktree, git repo flag, platform), `<global_instruction>` for any `AGENTS.md`/`CLAUDE.md` loaded from the global agent dir, `<project_instruction>` for any loaded from the cwd or its ancestors, and `<available_skills>` for skills discovered by Pi. Tool definitions and descriptions are still supplied through Pi's normal tool API rather than copied into this prompt. Only tools currently enabled by Pi are rendered; an unconfigured enabled tool falls back to Pi's own one-line snippet.
+Only tools currently enabled by Pi appear under `<tool_use>`; an unconfigured enabled tool falls back to Pi's own one-line snippet. Context files and skills are never rediscovered by this extension — they follow Pi's loader and flags.
 
-```json
-{
-  "basePrompt": "You are a focused coding assistant.",
-  "general": [
-    "Be concise in your responses.",
-    "Show file paths clearly when working with files."
-  ],
-  "tools": {
-    "read": {
-      "snippet": "Read file contents.",
-      "guidelines": [
-        "Read the relevant files before editing them."
-      ]
-    }
-  }
-}
-```
-
-When no `basePrompt` is configured, the extension replaces Pi's available-tools block with a `<tool-use>` tag (or appends one if Pi omitted it), injects a `<general>` section when `general` is configured, and also strips Pi's default `Guidelines:` section (`Be concise`, `Show file paths clearly`, and the `Use bash for file operations` fallback). The rest of Pi's system prompt — the persona line, Pi documentation paths, project environment, AGENTS/skills — is preserved. Project config is read only after Pi trusts the project. Context files and skills are never rediscovered by this extension, so their behavior follows Pi's own loader and flags.
+When `basePrompt` is absent, the extension only replaces Pi's "Available tools:" block with `<tool_use>`, injects `<general_guidelines>` if configured, and strips Pi's default `Guidelines:` section. The rest of Pi's prompt is preserved.
 
 ---
 
-### 429-retry
+## 429-retry — auto-retry rate limits
 
-![429 limit](https://github.com/user-attachments/assets/907d920d-5d20-4193-b298-416179fc0c69)
+**What it does.** Retries transient HTTP 429s (any provider): up to 10 attempts, live status-bar countdown. Uses the response `retry-after` when present; otherwise an increasing wait sequence (`5, 10, 20, 30, 60, 90, …` — +30s after 30). Hard usage limits fail fast with the reset time.
 
-Retries transient HTTP 429 responses automatically (any provider): waits clamped to 1s–10min, up to 10 attempts, with a live status-bar countdown. Hard usage limits fail fast — the agent stops with the reset time instead.
+### Config: none (runtime only)
 
-**Command:** `/429-retry` toggles on/off · `/429-retry <seconds>` sets the default wait when the response carries no `retry-after` (default 30s)
+| Command | Effect |
+|---------|--------|
+| `/429-retry` | Toggle on/off |
+| `/429-retry <seconds>` | Use a fixed wait (seconds) instead of the increasing sequence |}
 
-**File:** `429-retry.ts`
+---
+
+## startup-header — boot screen
+
+**What it does.** Animated pixel Pi logo + compact resource counts. `ctrl+o` expands the detailed loaded-resources breakdown.
+
+### Config: `~/.pi/agent/settings.json` → `quietStartup`
+
+Expanding the header sets `"quietStartup": true` so Pi's verbose native loaded-resources panel stays hidden. Restore it with:
+
+```json
+{
+  "quietStartup": false
+}
+```
+
+No other config file.
+
+---
+
+## Extensions with no config
+
+| Extension | What it does | Notes |
+|-----------|--------------|-------|
+| **editor** | Mode-colored input border; `$skill` mentions + picker | No config file |
+| **request-logger** | Logs every provider request to `~/.pi/agent/requests/<session>.request.log` | Output dir only; no knobs |
+| **shortcuts** | `Ctrl+Shift+C` → copy editor content to clipboard | No config file |
+
+---
+
+## Package layout (for contributors)
+
+```
+editor.ts
+request-logger.ts
+shortcuts.ts
+429-retry.ts
+startup-header.ts
+system-prompt.ts          # + system-prompt-{config,core,env}.ts
+status/                   # footer, worked-for, auto-title, /statusline
+tool-display/             # render overrides + ~/.pi/agent/tool-display.json
+pi-mode/                  # vendored subtree → ~/.pi/agent/pi-mode-config.jsonc
+```
+
+Loaded-resources labels use the package.json `name`: `@ssparkluo/my-pi:editor.ts`, `@ssparkluo/my-pi:status`, …
