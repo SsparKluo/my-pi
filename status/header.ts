@@ -191,6 +191,8 @@ export function computeTurnStats(
 
 export interface HeaderRenderData {
     gitStatus: GitStatus | null;
+    /** Active pi-mode label (e.g. "⏸ plan"), already styled. Omitted in normal mode. */
+    piModeStatus?: string;
 }
 
 /**
@@ -206,6 +208,11 @@ export function buildStatusHeader(
 ): string[] {
     const parts: string[] = [];
     const sep = theme.fg("borderMuted", " \u2502 ");
+
+    // 0. Active pi-mode (e.g. ⏸ plan) — shown only when a non-default mode is active
+    if (data.piModeStatus) {
+        parts.push(data.piModeStatus);
+    }
 
     // 1. Model + thinking:  openai gpt-5.5 low
     if (config.model && ctx.model) {

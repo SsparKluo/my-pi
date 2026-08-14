@@ -198,10 +198,13 @@ function createFooterFactory(
       const lines: string[] = [];
 
       // 1. Model / path / git — below the editor, above the context line
+      const piModeStatus = footerData
+        .getExtensionStatuses()
+        .get("pi-mode");
       for (const l of buildStatusHeader(
         pi,
         ctx,
-        { gitStatus: state.gitStatus },
+        { gitStatus: state.gitStatus, piModeStatus },
         config,
         theme,
       )) {
