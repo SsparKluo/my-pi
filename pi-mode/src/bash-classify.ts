@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import type { Action, BashClass, BashRisk, ClassifyMap } from "./config.ts";
+import type { Action, BashClass, BashRisk, ClassifyMap, GradeAction } from "./config.ts";
 
 export interface BashClassifyResult {
 	classification: BashClass | string;
@@ -11,14 +11,14 @@ export type BashClassifyRunner = (command: string) => Promise<BashClassifyResult
 
 const ACTION_RANK: Record<Action, number> = { deny: 3, ask: 2, classify: 2, allow: 1 };
 
-const DEFAULT_BY_RISK: Record<string, Action> = { LOW: "allow", MEDIUM: "ask", HIGH: "ask" };
+const DEFAULT_BY_RISK: Record<string, GradeAction> = { LOW: "allow", MEDIUM: "ask", HIGH: "ask" };
 
 /** Class map wins when present; otherwise risk; otherwise fallback. */
 export function mapBashClassifyAction(
 	result: BashClassifyResult,
 	maps: ClassifyMap,
-	fallback: Action = "ask",
-): Action {
+	fallback: GradeAction = "ask",
+): GradeAction {
 	const classAction = maps.byClass?.[result.classification as BashClass];
 	if (classAction) return classAction;
 	const riskAction = maps.byRisk?.[result.risk as BashRisk] ?? DEFAULT_BY_RISK[result.risk];
@@ -29,8 +29,6 @@ export function mergeClassifyMaps(global: ClassifyMap, mode?: ClassifyMap): Clas
 	return {
 		byRisk: { ...global.byRisk, ...mode?.byRisk },
 		byClass: { ...global.byClass, ...mode?.byClass },
-		verdicts: mode?.verdicts ?? global.verdicts,
-		fallback: mode?.fallback ?? global.fallback,
 	};
 }
 
@@ -90,10 +88,10 @@ export function createBashClassifyRunner(command: string): BashClassifyRunner {
 export async function gradeBashUnits(
 	targets: string[],
 	maps: ClassifyMap,
-	fallback: Action,
+	fallback: GradeAction,
 	run: BashClassifyRunner,
-): Promise<{ unit: string; action: Action }[]> {
-	const out: { unit: string; action: Action }[] = [];
+): Promise<{ unit: string; action: GradeAction }[]> {
+	const out: { unit: string; action: GradeAction }[] = [];
 	for (const unit of targets) {
 		try {
 			const result = await run(unit);
@@ -108,12 +106,12 @@ export async function gradeBashUnits(
 export async function classifyBashCommands(
 	targets: string[],
 	maps: ClassifyMap,
-	fallback: Action,
+	fallback: GradeAction,
 	run: BashClassifyRunner,
 ): Promise<Action> {
 	const graded = await gradeBashUnits(targets, maps, fallback, run);
 	return mostRestrictiveAction(
-		graded.map((g) => g.action),
-		fallback,
+		graded.map((g) => (g.action === "model" ? "ask" : g.action)),
+		fallback === "model" ? "ask" : fallback,
 	);
 }

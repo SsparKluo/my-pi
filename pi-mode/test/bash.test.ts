@@ -6,7 +6,7 @@ import { PLAN_PERMISSION } from "./plan-permission.ts";
 const cwd = "/home/louis/proj";
 const plan = PLAN_PERMISSION;
 const wrappers = DEFAULT_CONFIG.commandWrappers;
-const threshold = DEFAULT_CONFIG.classifier.wholeCommandThreshold;
+const threshold = DEFAULT_CONFIG.bashClassify.wholeCommandThreshold;
 
 function ev(command: string, rules = plan) {
 	return evaluateBashCommand(command, rules, wrappers, threshold, cwd);

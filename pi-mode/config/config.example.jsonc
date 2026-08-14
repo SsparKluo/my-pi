@@ -2,27 +2,37 @@
 //
 // Written on first load. One mode: `default`.
 // No prompts. In-workspace tools are allowed (except reading .env).
-// bash-classify: READONLY + LOCAL_EFFECTS allow; everything else asks.
+// bash: bash-classify grades, byClass/byRisk pick the verdict; "model" defers to the small LLM.
 // Omit `permission` entirely for vanilla pi (no gating).
 // last-match-wins: later keys overwrite (e.g. "*": "classify", "rm *": "ask").
 
 {
   "defaultMode": "default",
   "commandWrappers": ["rtk", "time", "nice", "command"],
+  "bashClassify": {
+    "command": "bash-classify",
+    "byRisk": { "LOW": "allow", "MEDIUM": "ask", "HIGH": "ask" },
+    "byClass": {
+      "READONLY": "allow",
+      "LOCAL_EFFECTS": "allow",
+      "EXTERNAL_EFFECTS": "ask",
+      "DANGEROUS": "ask",
+      "UNKNOWN": "ask"
+    },
+    "fallback": "ask"
+  },
+  "model": {
+    "model": "anthropic/claude-haiku-4-5",
+    // "fallbackModels": ["openai/gpt-5-mini"],   // tried in order when the primary fails
+    "verdicts": ["allow", "deny"],
+    "fallback": "deny",
+    "cache": true
+  },
   "modes": {
     "default": {
       "onEnterPrompt": null,
       "onExitPrompt": null,
       "perTurnPrompt": null,
-      "classify": {
-        "byClass": {
-          "READONLY": "allow",
-          "LOCAL_EFFECTS": "allow",
-          "EXTERNAL_EFFECTS": "ask",
-          "DANGEROUS": "ask",
-          "UNKNOWN": "ask"
-        }
-      },
       "permission": {
         "*": "allow",
         "read": {
@@ -42,8 +52,10 @@
 //
 // surfaces:  bash | read | write | edit | grep | find | ls | externalPath | *
 // actions:   allow | deny | ask | classify
-// classify:  bash-classify (READONLY / LOCAL_EFFECTS / EXTERNAL_EFFECTS / DANGEROUS / UNKNOWN)
-//            + risk LOW / MEDIUM / HIGH. Mode `classify.byClass` / `byRisk` maps to actions.
+// classify:  grade via bash-classify, then byClass/byRisk pick the verdict.
+// grade verdicts (byClass/byRisk values): allow | deny | ask | model
+//            "model" = defer that unit to the small LLM (model.verdicts picks its answers;
+//            omit "ask" from verdicts for a hands-off mode).
 // value:     "<action>"  or  { "<pattern>": "<action>", ... }   (last-match-wins)
 // bash/tool patterns = command-prefix globs ("git push *")
 // write/edit/externalPath = file-path globs ("**/*.md"); externalPath only gates paths outside cwd

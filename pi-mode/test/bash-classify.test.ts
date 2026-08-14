@@ -12,13 +12,13 @@ const cwd = "/tmp/proj";
 const wrappers = DEFAULT_CONFIG.commandWrappers;
 
 describe("mapBashClassifyAction", () => {
-	it("keeps byClass classify so the small model can judge", () => {
+	it("lets byClass defer to the model", () => {
 		expect(
 			mapBashClassifyAction(
 				{ classification: "EXTERNAL_EFFECTS", risk: "MEDIUM" },
-				{ byClass: { EXTERNAL_EFFECTS: "classify" } },
+				{ byClass: { EXTERNAL_EFFECTS: "model" } },
 			),
-		).toBe("classify");
+		).toBe("model");
 	});
 
 	it("uses byClass when the classification is listed", () => {

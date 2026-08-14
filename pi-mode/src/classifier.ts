@@ -1,4 +1,4 @@
-import type { Action, ClassifierConfig } from "./config.ts";
+import type { Action, ModelClassifierConfig } from "./config.ts";
 
 export const DEFAULT_CLASSIFIER_PROMPT = `You are a safety classifier for bash commands in a coding-agent session.
 Reply with exactly one word from the allowed verdicts listed in the user message.
@@ -84,7 +84,7 @@ export interface ClassifierCall {
 }
 
 export async function classifyCommands(opts: {
-	config: ClassifierConfig;
+	config: ModelClassifierConfig;
 	wholeCommand: string;
 	targets: string[];
 	agentsMd: string;

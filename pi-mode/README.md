@@ -80,12 +80,19 @@ to the in-memory default (`default` mode, no permission).
       }
     }
   },
-  "classifier": {                    // referenced by any mode emitting `classify`
+  "bashClassify": {                  // grades units for `classify`
+    "command": "bash-classify",
+    "byRisk": { "LOW": "allow", "MEDIUM": "ask", "HIGH": "ask" },
+    "byClass": { },                  // values: allow | deny | ask | model
+    "fallback": "ask",
+    "wholeCommandThreshold": 2
+  },
+  "model": {                         // small LLM for units mapped to "model"
     "model": "anthropic/claude-haiku-4-5",
-    "verdicts": ["allow","deny"],
+    "fallbackModels": [],            // tried in order when the primary fails
+    "verdicts": ["allow","deny"],    // omit "ask" for a hands-off mode
     "fallback": "deny",
     "cache": true,
-    "wholeCommandThreshold": 2,
     "prompt": null                   // null = built-in default
   },
   "ask": {
@@ -96,9 +103,9 @@ to the in-memory default (`default` mode, no permission).
 
 - **surfaces**: `bash`, `read`, `write`, `edit`, `grep`, `find`, `ls`, `externalPath`,
   `*` (catch-all for unknown/extension tools).
-- **actions**: `allow` | `deny` | `ask` | `classify` (`classify` → bash-classify, then the small
-  model for classes mapped to `classify`). Per-mode `classify.verdicts` chooses whether the
-  model may answer `ask` (omit it for hands-off auto). Later bash patterns still overwrite.
+- **actions**: `allow` | `deny` | `ask` | `classify` (grade via bash-classify; `byClass`/`byRisk`
+  values are `allow`/`deny`/`ask`/`model` — `model` defers that unit to the small LLM whose
+  `verdicts` may exclude `ask` for hands-off modes). Later bash patterns still overwrite.
 - **value forms**:
   - string → single action for the whole surface (e.g. `"read": "allow"`).
   - object → pattern→action map, **last-match-wins** (put general rules first,
@@ -165,7 +172,7 @@ Non-interactive sessions (`!ctx.hasUI`) deny on `ask` (fail-closed).
 
 Triggered only when a bash unit/surface resolves to `classify` (e.g. auto mode).
 
-- Model: `classifier.model` via `modelRegistry.complete`
+- Model: `model.model` via `modelRegistry.complete`
 - Context: classifier prompt + loaded `AGENTS.md` + last 3 user messages + whole original command + the uncertain unit(s)
 - Verdicts: `classifier.verdicts` (default `allow`/`deny`); on error/unparseable → `classifier.fallback` (default `deny`)
 - Session cache when `classifier.cache` is true

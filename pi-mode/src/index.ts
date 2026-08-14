@@ -36,7 +36,7 @@ type ChangeReason = "startup" | "resume" | "reload" | "switch";
  */
 export default function piMode(pi: ExtensionAPI): void {
 	const config: PiModeConfig = loadConfig();
-	const bashClassify = createBashClassifyRunner(config.classifier.command);
+	const bashClassify = createBashClassifyRunner(config.bashClassify.command);
 
 	let currentMode: string | undefined;
 	// Mode active when the last user message was sent. Drives which prompt
@@ -236,7 +236,7 @@ export default function piMode(pi: ExtensionAPI): void {
 						subject,
 						rules,
 						config.commandWrappers,
-						config.classifier.wholeCommandThreshold,
+						config.bashClassify.wholeCommandThreshold,
 						ctx.cwd,
 				  )
 				: applyExternalPathGate(
@@ -247,21 +247,17 @@ export default function piMode(pi: ExtensionAPI): void {
 		let action = verdict.action;
 		if (action === "classify") {
 			const targets = verdict.classifyTargets ?? [verdict.subject];
-			if (config.classifier.engine === "model") {
-				action = await classifyVerdict(ctx, verdict.subject, targets);
-			} else {
-				const maps = mergeClassifyMaps(
-					config.classifier,
-					currentMode ? config.modes[currentMode]?.classify : undefined,
-				);
-				const graded = await gradeBashUnits(targets, maps, config.classifier.fallback, bashClassify);
-				const needsLlm = graded.filter((g) => g.action === "classify").map((g) => g.unit);
-				const rest = graded.filter((g) => g.action !== "classify").map((g) => g.action);
-				if (needsLlm.length > 0) {
-					rest.push(await classifyVerdict(ctx, verdict.subject, needsLlm));
-				}
-				action = mostRestrictiveAction(rest, config.classifier.fallback);
+			const maps = mergeClassifyMaps(
+				config.bashClassify,
+				currentMode ? config.modes[currentMode]?.classify : undefined,
+			);
+			const graded = await gradeBashUnits(targets, maps, config.bashClassify.fallback, bashClassify);
+			const needsLlm = graded.filter((g) => g.action === "model").map((g) => g.unit);
+			const rest = graded.filter((g) => g.action !== "model").map((g) => g.action as Action);
+			if (needsLlm.length > 0) {
+				rest.push(await classifyVerdict(ctx, verdict.subject, needsLlm));
 			}
+			action = mostRestrictiveAction(rest, config.model.fallback);
 		}
 		if (action === "allow") return;
 		if (action === "deny") {
@@ -309,14 +305,18 @@ export default function piMode(pi: ExtensionAPI): void {
 
 	// Restore (resume) or initialize (startup) the active mode.
 	async function classifyVerdict(ctx: ExtensionContext, wholeCommand: string, targets: string[]): Promise<Action> {
-		const modeClassify = currentMode ? config.modes[currentMode]?.classify : undefined;
+		const override = currentMode ? config.modes[currentMode]?.model : undefined;
 		const classifier = {
-			...config.classifier,
-			verdicts: modeClassify?.verdicts ?? config.classifier.verdicts,
-			fallback: modeClassify?.fallback ?? config.classifier.fallback,
+			...config.model,
+			verdicts: override?.verdicts ?? config.model.verdicts,
+			fallback: override?.fallback ?? config.model.fallback,
 		};
-		const ref = parseModelRef(classifier.model);
-		const model = ref ? ctx.modelRegistry.find(ref.provider, ref.modelId) : undefined;
+		const chain = [classifier.model, ...(classifier.fallbackModels ?? [])]
+			.map((candidate) => {
+				const parsed = parseModelRef(candidate);
+				return parsed ? ctx.modelRegistry.find(parsed.provider, parsed.modelId) : undefined;
+			})
+			.filter((m): m is NonNullable<typeof m> => !!m && ctx.modelRegistry.hasConfiguredAuth(m));
 		return classifyCommands({
 			config: classifier,
 			wholeCommand,
@@ -325,27 +325,32 @@ export default function piMode(pi: ExtensionAPI): void {
 			userMessages: lastUserTexts(ctx.sessionManager.getBranch()),
 			cache: classifyCache,
 			complete: async (call) => {
-				if (!model || !ctx.modelRegistry.hasConfiguredAuth(model)) {
-					throw new Error("classifier model unavailable");
+				let lastError: unknown = new Error("classifier model unavailable");
+				for (const candidate of chain) {
+					try {
+						const result = await ctx.modelRegistry.complete(
+							candidate,
+							{
+								systemPrompt: call.systemPrompt,
+								messages: [{ role: "user", content: call.userContent, timestamp: Date.now() }],
+							},
+							{
+								reasoningEffort: "low",
+								cacheRetention: "none",
+								sessionId: randomUUID(),
+								signal: ctx.signal,
+							},
+						);
+						if (result.errorMessage) throw new Error(result.errorMessage);
+						return result.content
+							.filter((part): part is { type: "text"; text: string } => part.type === "text")
+							.map((part) => part.text)
+							.join("");
+					} catch (err) {
+						lastError = err;
+					}
 				}
-				const result = await ctx.modelRegistry.complete(
-					model,
-					{
-						systemPrompt: call.systemPrompt,
-						messages: [{ role: "user", content: call.userContent, timestamp: Date.now() }],
-					},
-					{
-						reasoningEffort: "low",
-						cacheRetention: "none",
-						sessionId: randomUUID(),
-						signal: ctx.signal,
-					},
-				);
-				if (result.errorMessage) throw new Error(result.errorMessage);
-				return result.content
-					.filter((part): part is { type: "text"; text: string } => part.type === "text")
-					.map((part) => part.text)
-					.join("");
+				throw lastError;
 			},
 		});
 	}

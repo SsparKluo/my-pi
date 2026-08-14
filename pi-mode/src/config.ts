@@ -4,12 +4,14 @@ import { fileURLToPath } from "node:url";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { parseJsonc } from "./jsonc.ts";
 
-/** A permission action. `classify` routes bash to bash-classify (or the AI engine). */
+/** A permission action. `classify` routes bash to the grading pipeline. */
 export type Action = "allow" | "deny" | "ask" | "classify";
+
+/** A grading verdict: a final action, or `model` to defer to the small LLM. */
+export type GradeAction = "allow" | "deny" | "ask" | "model";
 
 export type BashClass = "READONLY" | "LOCAL_EFFECTS" | "EXTERNAL_EFFECTS" | "DANGEROUS" | "UNKNOWN";
 export type BashRisk = "LOW" | "MEDIUM" | "HIGH";
-export type ClassifierEngine = "bash-classify" | "model";
 
 /** A surface's rules: a single action, or a pattern→action map (last-match-wins). */
 export type SurfaceRule = Action | Record<string, Action>;
@@ -19,9 +21,12 @@ export interface PermissionRules {
 }
 
 export interface ClassifyMap {
-	byRisk?: Partial<Record<BashRisk, Action>>;
-	byClass?: Partial<Record<BashClass, Action>>;
-	/** LLM allowed answers. Omit `ask` for a hands-off mode. */
+	byRisk?: Partial<Record<BashRisk, GradeAction>>;
+	byClass?: Partial<Record<BashClass, GradeAction>>;
+}
+
+/** Per-mode overlay on the model classifier. */
+export interface ModelOverride {
 	verdicts?: string[];
 	fallback?: Action;
 }
@@ -31,20 +36,28 @@ export interface ModeConfig {
 	onExitPrompt?: string | null;
 	perTurnPrompt?: string | null;
 	permission?: PermissionRules;
-	/** Per-mode overlay on the global classifier maps. */
+	/** Per-mode overlay on the bash-classify maps. */
 	classify?: ClassifyMap;
+	/** Per-mode overlay on the model classifier. */
+	model?: ModelOverride;
 }
 
-export interface ClassifierConfig {
-	engine: ClassifierEngine;
+export interface BashClassifyConfig {
 	command: string;
-	byRisk: Partial<Record<BashRisk, Action>>;
-	byClass: Partial<Record<BashClass, Action>>;
+	byRisk: Partial<Record<BashRisk, GradeAction>>;
+	byClass: Partial<Record<BashClass, GradeAction>>;
+	/** Grade verdict when the runner fails or a class/risk maps to nothing. */
+	fallback: GradeAction;
+	wholeCommandThreshold: number;
+}
+
+export interface ModelClassifierConfig {
 	model: string;
+	/** Tried in order when the primary model fails or is unauthenticated. */
+	fallbackModels?: string[];
 	verdicts: string[];
 	fallback: Action;
 	cache: boolean;
-	wholeCommandThreshold: number;
 	prompt?: string | null;
 }
 
@@ -56,7 +69,8 @@ export interface PiModeConfig {
 	defaultMode: string;
 	commandWrappers: string[];
 	modes: Record<string, ModeConfig>;
-	classifier: ClassifierConfig;
+	bashClassify: BashClassifyConfig;
+	model: ModelClassifierConfig;
 	ask: AskConfig;
 }
 
@@ -82,16 +96,19 @@ export const DEFAULT_CONFIG: PiModeConfig = {
 	modes: {
 		[DEFAULT_MODE]: {},
 	},
-	classifier: {
-		engine: "bash-classify",
+	bashClassify: {
 		command: "bash-classify",
 		byRisk: { LOW: "allow", MEDIUM: "ask", HIGH: "ask" },
 		byClass: {},
-		model: "anthropic/claude-haiku-4-5",
-		verdicts: ["allow", "deny"],
 		fallback: "ask",
-		cache: true,
 		wholeCommandThreshold: 2,
+	},
+	model: {
+		model: "anthropic/claude-haiku-4-5",
+			fallbackModels: [],
+		verdicts: ["allow", "deny"],
+		fallback: "deny",
+		cache: true,
 		prompt: null,
 	},
 	ask: { maxBlockHeight: 10 },
@@ -148,15 +165,22 @@ function mergeClassifyMaps(base?: ClassifyMap, over?: ClassifyMap): ClassifyMap 
 	return {
 		byRisk: { ...base?.byRisk, ...over?.byRisk },
 		byClass: { ...base?.byClass, ...over?.byClass },
+	};
+}
+
+function mergeModelOverride(base?: ModelOverride, over?: ModelOverride): ModelOverride | undefined {
+	if (!base && !over) return undefined;
+	return {
 		verdicts: over?.verdicts ?? base?.verdicts,
 		fallback: over?.fallback ?? base?.fallback,
 	};
 }
 
-/** `default` stays as written. Other modes inherit its permission + classify maps (or all-allow if it has none). */
+/** `default` stays as written. Other modes inherit its permission / classify / model overlays (or all-allow if it has none). */
 export function inheritPermissions(modes: Record<string, ModeConfig>): Record<string, ModeConfig> {
 	const parent = modes.default?.permission;
 	const parentClassify = modes.default?.classify;
+	const parentModel = modes.default?.model;
 	const out: Record<string, ModeConfig> = {};
 	for (const [name, mode] of Object.entries(modes)) {
 		if (name === "default") {
@@ -164,7 +188,7 @@ export function inheritPermissions(modes: Record<string, ModeConfig>): Record<st
 			continue;
 		}
 		const child = mode?.permission;
-		if (!parent && !child && !parentClassify && !mode?.classify) {
+		if (!parent && !child && !parentClassify && !mode?.classify && !parentModel && !mode?.model) {
 			out[name] = mode;
 			continue;
 		}
@@ -173,9 +197,17 @@ export function inheritPermissions(modes: Record<string, ModeConfig>): Record<st
 			...mode,
 			permission: child && base ? mergePermissionRules(base, child) : child ?? (base ? structuredClone(base) : child),
 			classify: mergeClassifyMaps(parentClassify, mode?.classify),
+			model: mergeModelOverride(parentModel, mode?.model),
 		};
 	}
 	return out;
+}
+
+const GRADE_ACTIONS = new Set<GradeAction>(["allow", "deny", "ask", "model"]);
+
+function asGradeAction(value: unknown, fallback: GradeAction = "ask"): GradeAction {
+	if (value === undefined) return fallback;
+	return typeof value === "string" && GRADE_ACTIONS.has(value as GradeAction) ? (value as GradeAction) : fallback;
 }
 
 function sanitizeClassifyMap(raw: unknown): ClassifyMap | undefined {
@@ -184,20 +216,27 @@ function sanitizeClassifyMap(raw: unknown): ClassifyMap | undefined {
 	const out: ClassifyMap = {};
 	if (rec.byRisk && typeof rec.byRisk === "object") {
 		out.byRisk = Object.fromEntries(
-			Object.entries(rec.byRisk).map(([k, v]) => [k, asAction(v, "ask")]),
+			Object.entries(rec.byRisk).map(([k, v]) => [k, asGradeAction(v)]),
 		) as ClassifyMap["byRisk"];
 	}
 	if (rec.byClass && typeof rec.byClass === "object") {
 		out.byClass = Object.fromEntries(
-			Object.entries(rec.byClass).map(([k, v]) => [k, asAction(v, "ask")]),
+			Object.entries(rec.byClass).map(([k, v]) => [k, asGradeAction(v)]),
 		) as ClassifyMap["byClass"];
 	}
+	return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function sanitizeModelOverride(raw: unknown): ModelOverride | undefined {
+	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+	const rec = raw as ModelOverride;
+	const out: ModelOverride = {};
 	if (Array.isArray(rec.verdicts)) {
 		const kept = rec.verdicts.filter((v): v is string => typeof v === "string" && ACTIONS.has(v as Action));
 		if (kept.length > 0) out.verdicts = kept;
 	}
 	if (rec.fallback !== undefined) out.fallback = asAction(rec.fallback);
-	return out;
+	return Object.keys(out).length > 0 ? out : undefined;
 }
 
 function sanitizeModes(modes: Record<string, ModeConfig>): Record<string, ModeConfig> {
@@ -212,15 +251,16 @@ function sanitizeModes(modes: Record<string, ModeConfig>): Record<string, ModeCo
 					)
 				: permission,
 			classify: sanitizeClassifyMap(mode?.classify),
+			model: sanitizeModelOverride(mode?.model),
 		};
 	}
 	return out;
 }
 
 function sanitizeVerdicts(raw: unknown): string[] {
-	if (!Array.isArray(raw)) return DEFAULT_CONFIG.classifier.verdicts;
+	if (!Array.isArray(raw)) return DEFAULT_CONFIG.model.verdicts;
 	const kept = raw.filter((v): v is string => typeof v === "string" && ACTIONS.has(v as Action));
-	return kept.length > 0 ? kept : DEFAULT_CONFIG.classifier.verdicts;
+	return kept.length > 0 ? kept : DEFAULT_CONFIG.model.verdicts;
 }
 
 /** Merge a user-parsed config over defaults and coerce unknown actions to deny. */
@@ -231,24 +271,28 @@ export function parseConfig(parsed: unknown): PiModeConfig {
 		rawModes && typeof rawModes === "object" && !Array.isArray(rawModes) && Object.keys(rawModes).length > 0
 			? (rawModes as Record<string, ModeConfig>)
 			: DEFAULT_CONFIG.modes;
-	const classifierIn = (p.classifier ?? {}) as Partial<ClassifierConfig>;
-	const classifyMaps = sanitizeClassifyMap(classifierIn) ?? {};
-	const engine = classifierIn.engine === "model" ? "model" : DEFAULT_CONFIG.classifier.engine;
+	const gradeIn = (p.bashClassify ?? {}) as Partial<BashClassifyConfig>;
+	const gradeMaps = sanitizeClassifyMap(gradeIn) ?? {};
+	const modelIn = (p.model ?? {}) as Partial<ModelClassifierConfig>;
 	return {
 		defaultMode: typeof p.defaultMode === "string" ? p.defaultMode : DEFAULT_CONFIG.defaultMode,
 		commandWrappers: Array.isArray(p.commandWrappers) ? p.commandWrappers : DEFAULT_CONFIG.commandWrappers,
 		modes: inheritPermissions(sanitizeModes(structuredClone(modes))),
-		classifier: {
-			...DEFAULT_CONFIG.classifier,
-			...classifierIn,
-			engine,
-			command: typeof classifierIn.command === "string" && classifierIn.command.trim()
-				? classifierIn.command.trim()
-				: DEFAULT_CONFIG.classifier.command,
-			byRisk: { ...DEFAULT_CONFIG.classifier.byRisk, ...classifyMaps.byRisk },
-			byClass: { ...DEFAULT_CONFIG.classifier.byClass, ...classifyMaps.byClass },
-			fallback: asAction(classifierIn.fallback ?? DEFAULT_CONFIG.classifier.fallback),
-			verdicts: sanitizeVerdicts(classifierIn.verdicts ?? DEFAULT_CONFIG.classifier.verdicts),
+		bashClassify: {
+			...DEFAULT_CONFIG.bashClassify,
+			...gradeIn,
+			command: typeof gradeIn.command === "string" && gradeIn.command.trim()
+				? gradeIn.command.trim()
+				: DEFAULT_CONFIG.bashClassify.command,
+			byRisk: { ...DEFAULT_CONFIG.bashClassify.byRisk, ...gradeMaps.byRisk },
+			byClass: { ...DEFAULT_CONFIG.bashClassify.byClass, ...gradeMaps.byClass },
+			fallback: asGradeAction(gradeIn.fallback, DEFAULT_CONFIG.bashClassify.fallback),
+		},
+		model: {
+			...DEFAULT_CONFIG.model,
+			...modelIn,
+			fallback: asAction(modelIn.fallback ?? DEFAULT_CONFIG.model.fallback),
+			verdicts: sanitizeVerdicts(modelIn.verdicts ?? DEFAULT_CONFIG.model.verdicts),
 		},
 		ask: { ...DEFAULT_CONFIG.ask, ...(p.ask ?? {}) },
 	};

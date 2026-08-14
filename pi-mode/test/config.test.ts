@@ -12,7 +12,7 @@ describe("parseConfig", () => {
 		expect(Object.keys(cfg.modes)).toEqual(["default"]);
 		expect(cfg.modes.default?.permission).toBeUndefined();
 		expect(cfg.commandWrappers).toEqual(DEFAULT_CONFIG.commandWrappers);
-		expect(cfg.classifier).toEqual(DEFAULT_CONFIG.classifier);
+		expect(cfg.model).toEqual(DEFAULT_CONFIG.model);
 		expect(cfg.ask).toEqual(DEFAULT_CONFIG.ask);
 	});
 
@@ -110,15 +110,15 @@ describe("parseConfig", () => {
 	});
 
 	it("coerces an invalid classifier fallback to deny", () => {
-		const cfg = parseConfig({ classifier: { fallback: "maybe" } });
-		expect(cfg.classifier.fallback).toBe("deny");
+		const cfg = parseConfig({ model: { fallback: "maybe" } });
+		expect(cfg.model.fallback).toBe("deny");
 	});
 
 	it("drops unknown classifier verdicts and restores the default set if none remain", () => {
-		const kept = parseConfig({ classifier: { verdicts: ["allow", "nope", "deny"] } });
-		expect(kept.classifier.verdicts).toEqual(["allow", "deny"]);
-		const empty = parseConfig({ classifier: { verdicts: ["nope"] } });
-		expect(empty.classifier.verdicts).toEqual(DEFAULT_CONFIG.classifier.verdicts);
+		const kept = parseConfig({ model: { verdicts: ["allow", "nope", "deny"] } });
+		expect(kept.model.verdicts).toEqual(["allow", "deny"]);
+		const empty = parseConfig({ model: { verdicts: ["nope"] } });
+		expect(empty.model.verdicts).toEqual(DEFAULT_CONFIG.model.verdicts);
 	});
 });
 
@@ -145,8 +145,8 @@ describe("parseJsonc", () => {
 		expect(parsed.defaultMode).toBe("default");
 		expect(Object.keys(parsed.modes)).toEqual(["default"]);
 		expect(parsed.modes.default?.permission?.bash).toBe("classify");
-		expect(parsed.modes.default?.classify?.byClass?.READONLY).toBe("allow");
-		expect(parsed.modes.default?.classify?.byClass?.EXTERNAL_EFFECTS).toBe("ask");
+		expect(parsed.bashClassify.byClass?.READONLY).toBe("allow");
+		expect(parsed.bashClassify.byClass?.EXTERNAL_EFFECTS).toBe("ask");
 	});
 });
 

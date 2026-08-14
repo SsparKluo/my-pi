@@ -11,7 +11,7 @@ import {
 } from "../src/classifier.ts";
 import { DEFAULT_CONFIG } from "../src/config.ts";
 
-const cfg = DEFAULT_CONFIG.classifier;
+const cfg = DEFAULT_CONFIG.model;
 
 describe("parseModelRef", () => {
 	it("splits provider/id", () => {
@@ -122,7 +122,7 @@ describe("classifyCommands", () => {
 				throw new Error("offline");
 			},
 		});
-		await expect(boom).resolves.toBe("ask");
+		await expect(boom).resolves.toBe("deny");
 
 		const junk = classifyCommands({
 			config: cfg,
@@ -133,7 +133,7 @@ describe("classifyCommands", () => {
 			cache: new Map(),
 			complete: async () => "not a verdict",
 		});
-		await expect(junk).resolves.toBe("ask");
+		await expect(junk).resolves.toBe("deny");
 	});
 
 	it("classifies each target and merges deny over allow", async () => {

@@ -40,7 +40,7 @@ AI bash classifier.
 | Q3 | `permission` block optional (omit → prompt-only). `classify` is a first-class action. Global `commandWrappers`. |
 | Q4 | Three optional prompt fields emitted as their own block at send time (never the system prompt — that would bust the KV-cache prefix): `onEnterPrompt`/`onExitPrompt` on a mode change (displayed as a compact label), `perTurnPrompt` while staying in a mode (invisible, model-only). State persisted via session entry. |
 | Q5 | Broadcast `pi-mode:changed` event + footer status line + session-entry-readable. UX: `--pi-mode` flag, `/mode` command + selector, cycle shortcut. No service accessor yet. |
-| Q6 | `classify` uses bash-classify by default (risk/class → allow/ask/deny). Explicit bash patterns still win (last-match-wins). `engine: "model"` keeps the old LLM classifier. |
+| Q6 | `classify` grades via bash-classify (`byClass`/`byRisk` → allow/ask/deny/`model`); `model` defers the unit to the small LLM (`model.verdicts` may exclude `ask`). Explicit bash patterns still win (last-match-wins). |
 | Q7 | Ask dialog = custom TUI (`ctx.ui.custom`); codeblock, foldable, max-height internal scroll; session approvals record the matched pattern; fail-closed non-interactive deny. |
 | §38 | `unbash` parses bash to AST before classification. |
 | §47 | Transparent wrappers (`rtk`, …) stripped; hiding wrappers (`eval`, `sudo`, …) → fail-closed ask. |
@@ -65,12 +65,19 @@ See `config/config.example.jsonc` for the shipped (commented) template.
       }
     }
   },
-  "classifier": {                    // referenced by any mode emitting `classify`
+  "bashClassify": {                  // grades units for `classify`
+    "command": "bash-classify",
+    "byRisk": { "LOW": "allow", "MEDIUM": "ask", "HIGH": "ask" },
+    "byClass": { },                  // values: allow | deny | ask | model
+    "fallback": "ask",
+    "wholeCommandThreshold": 2
+  },
+  "model": {                         // small LLM for units mapped to "model"
     "model": "anthropic/claude-haiku-4-5",
-    "verdicts": ["allow","deny"],
+    "fallbackModels": [],            // tried in order when the primary fails
+    "verdicts": ["allow","deny"],    // omit "ask" for a hands-off mode
     "fallback": "deny",
     "cache": true,
-    "wholeCommandThreshold": 2,
     "prompt": null                   // null = built-in default
   },
   "ask": {
@@ -212,16 +219,16 @@ Triggered only when a bash unit/surface resolves to `classify`.
   `hasConfiguredAuth`; `complete({messages}, { reasoningEffort:"low",
   cacheRetention:"none", sessionId: fresh })`. Read text content.
 - **Context**:
-  - system: classifier instructions (built-in default or `classifier.prompt`).
+  - system: classifier instructions (built-in default or `model.prompt`).
   - `AGENTS.md` (captured at `before_agent_start` from pi's loaded context files, cached).
   - last 3 **user** messages (`ctx.sessionManager.getBranch()` filtered).
   - the **whole original command** (context).
   - request: the **uncertain unit(s)** (≤threshold case) OR the whole command
     (whole-command case).
-- **Verdict**: parse response to `classifier.verdicts` (`allow`/`deny`);
-  tie-break toward `deny`. On error/unparseable → `classifier.fallback`
+- **Verdict**: parse response to `model.verdicts` (`allow`/`deny`);
+  tie-break toward `deny`. On error/unparseable → `model.fallback`
   (default `deny`).
-- **Cache**: `classifier.cache` → per-session `Map` keyed by normalized
+- **Cache**: `model.cache` → per-session `Map` keyed by normalized
   unit/command string; repeats short-circuit.
 - **Safety floor**: flat `deny` rules always win (evaluated before classifier).
 
