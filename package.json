@@ -3,6 +3,10 @@
 	"version": "0.1.0",
 	"description": "A collection of pi extensions for an enhanced coding experience",
 	"license": "MIT",
+	"dependencies": {
+		"minimatch": "10.2.5",
+		"unbash": "4.0.8"
+	},
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/SsparKluo/my-pi.git"

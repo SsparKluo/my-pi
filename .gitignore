@@ -1,8 +1,5 @@
 # local type-check harness — machine-specific paths into the pi install
 tsconfig.pi.json
 
-# dev dependencies installed only for local type-checking
+# dependencies installed at package root (unbash, minimatch for pi-mode)
 node_modules/
-
-# this package ships no npm dependencies
-package-lock.json
