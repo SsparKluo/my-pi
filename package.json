@@ -17,7 +17,8 @@
 		"system-prompt-core.ts",
 		"system-prompt-env.ts",
 		"status/",
-		"tool-display/"
+		"tool-display/",
+		"pi-mode/"
 	],
 	"pi": {
 		"extensions": [
@@ -28,7 +29,8 @@
 			"./startup-header.ts",
 			"./system-prompt.ts",
 			"./status/",
-			"./tool-display/"
+			"./tool-display/",
+			"./pi-mode/src/index.ts"
 		]
 	}
 }
