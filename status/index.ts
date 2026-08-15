@@ -185,6 +185,7 @@ function createInitialState(): AppState {
 // nerd-font tachometer icon. Empty when there is nothing to show.
 
 const MAGIC_CONTEXT_STATUS_KEY = "magic-context";
+const RATE_LIMIT_STATUS_KEY = "429-retry";
 
 function createFooterFactory(
   pi: ExtensionAPI,
@@ -197,10 +198,10 @@ function createFooterFactory(
       const config = configRef.current;
       const lines: string[] = [];
 
+      const extensionStatuses = footerData.getExtensionStatuses();
+
       // 1. Model / path / git — below the editor, above the context line
-      const piModeStatus = footerData
-        .getExtensionStatuses()
-        .get("pi-mode");
+      const piModeStatus = extensionStatuses.get("pi-mode");
       for (const l of buildStatusHeader(
         pi,
         ctx,
@@ -211,11 +212,14 @@ function createFooterFactory(
         lines.push(truncateToWidth(l, width, theme.fg("dim", "...")));
       }
 
+      const rateLimitStatus = extensionStatuses.get(RATE_LIMIT_STATUS_KEY);
+      if (rateLimitStatus) {
+        lines.push(truncateToWidth(rateLimitStatus, width));
+      }
+
       // 2. Context line: magic-context status + cumulative token stats
       const parts: string[] = [];
-      const raw = footerData
-        .getExtensionStatuses()
-        .get(MAGIC_CONTEXT_STATUS_KEY);
+      const raw = extensionStatuses.get(MAGIC_CONTEXT_STATUS_KEY);
       if (raw) {
         const body = raw.startsWith("mc: ") ? raw.slice(4) : raw;
         parts.push(`\u{F0E4} ${body}`);
