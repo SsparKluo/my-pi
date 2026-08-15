@@ -128,8 +128,9 @@ Layers (each an independently runnable/verifiable slice):
 
 **State.** Current mode stored as a **session entry**
 `pi.appendEntry("pi-mode-state", { mode, ts })`. Restored on `session_start`
-(reason `startup`/`resume`/`reload`) via `ctx.sessionManager.getEntries()`; falls
-back to `defaultMode` then `default`.
+(reason `startup`/`resume`/`reload`) via `ctx.sessionManager.getBranch()` — the
+leaf→root walk, so a rewind restores the surviving branch's mode, not the file
+tail's; falls back to `defaultMode` then `default`.
 
 **Switching** (`--pi-mode <name>` flag, `/mode` selector, `/mode <name>`, cycle shortcut)
 only changes mode state — it emits no prompt. The mode's prompt attaches to the

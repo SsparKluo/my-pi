@@ -173,13 +173,7 @@ Global only — no project-level file. All keys optional; invalid fields fall ba
 
 Out of the box there is a single **`default`** mode: no prompts, in-workspace tools allowed (except reading `.env`), bash via bash-classify (`READONLY` + `LOCAL_EFFECTS` allow, else ask). Omit `permission` for vanilla pi.
 
-**bash-classify dependency.** The `classify` action shells out to the `bash-classify` CLI (stdin → JSON):
-
-```bash
-uv tool install bash-classify      # or: uvx --from bash-classify bash-classify
-```
-
-Custom command via `bashClassify.command`. If the CLI is missing or fails, grading falls back to `bashClassify.fallback` (default `ask`), never silently allows.
+**bash grading.** The `classify` action grades bash commands in-process — a TypeScript port of [bash-classify](https://github.com/fprochazka/bash-classify)'s command database (166 commands, MIT) on top of unbash, differentially tested against the Python original (271-command corpus, 100% match). Set `bashClassify.engine: "cli"` to shell out to the `bash-classify` CLI instead (`uv tool install bash-classify`; `bashClassify.command` overrides the invocation). If grading fails, `bashClassify.fallback` applies (default `ask`) — never silently allows.
 
 ### Config: `~/.pi/agent/pi-mode-config.jsonc`
 

@@ -43,11 +43,12 @@ export interface ModeConfig {
 }
 
 export interface BashClassifyConfig {
+	engine: "builtin" | "cli";
 	command: string;
 	byRisk: Partial<Record<BashRisk, GradeAction>>;
 	byClass: Partial<Record<BashClass, GradeAction>>;
-	/** Grade verdict when the runner fails or a class/risk maps to nothing. */
-	fallback: GradeAction;
+	/** Action when the runner fails or the verdict maps to nothing. */
+	fallback: Action;
 	wholeCommandThreshold: number;
 }
 
@@ -97,6 +98,7 @@ export const DEFAULT_CONFIG: PiModeConfig = {
 		[DEFAULT_MODE]: {},
 	},
 	bashClassify: {
+		engine: "builtin",
 		command: "bash-classify",
 		byRisk: { LOW: "allow", MEDIUM: "ask", HIGH: "ask" },
 		byClass: {},
@@ -281,12 +283,13 @@ export function parseConfig(parsed: unknown): PiModeConfig {
 		bashClassify: {
 			...DEFAULT_CONFIG.bashClassify,
 			...gradeIn,
+			engine: gradeIn.engine === "cli" ? "cli" : "builtin",
 			command: typeof gradeIn.command === "string" && gradeIn.command.trim()
 				? gradeIn.command.trim()
 				: DEFAULT_CONFIG.bashClassify.command,
 			byRisk: { ...DEFAULT_CONFIG.bashClassify.byRisk, ...gradeMaps.byRisk },
 			byClass: { ...DEFAULT_CONFIG.bashClassify.byClass, ...gradeMaps.byClass },
-			fallback: asGradeAction(gradeIn.fallback, DEFAULT_CONFIG.bashClassify.fallback),
+			fallback: asAction(gradeIn.fallback ?? DEFAULT_CONFIG.bashClassify.fallback, "ask"),
 		},
 		model: {
 			...DEFAULT_CONFIG.model,

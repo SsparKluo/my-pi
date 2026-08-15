@@ -10,6 +10,7 @@
   "defaultMode": "default",
   "commandWrappers": ["rtk", "time", "nice", "command"],
   "bashClassify": {
+    "engine": "builtin",
     "command": "bash-classify",
     "byRisk": { "LOW": "allow", "MEDIUM": "ask", "HIGH": "ask" },
     "byClass": {

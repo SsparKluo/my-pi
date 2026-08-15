@@ -15,7 +15,7 @@ import {
 	lastUserTexts,
 	parseModelRef,
 } from "./classifier.ts";
-import { getConfigPath, loadConfig, type Action, type PiModeConfig } from "./config.ts";
+import { getConfigPath, loadConfig, type Action, type GradeAction, type PiModeConfig } from "./config.ts";
 import { reportHerdrMode, setHerdrBlocked } from "./herdr.ts";
 import {
 	applyExternalPathGate,
@@ -25,8 +25,8 @@ import {
 	SessionApprovals,
 	subjectKind,
 } from "./permission.ts";
+import { findPersistedMode, STATE_ENTRY } from "./restore.ts";
 
-const STATE_ENTRY = "pi-mode-state";
 const EVENT_CHANGED = "pi-mode:changed";
 
 type ChangeReason = "startup" | "resume" | "reload" | "switch";
@@ -36,7 +36,7 @@ type ChangeReason = "startup" | "resume" | "reload" | "switch";
  */
 export default function piMode(pi: ExtensionAPI): void {
 	const config: PiModeConfig = loadConfig();
-	const bashClassify = createBashClassifyRunner(config.bashClassify.command);
+	const bashClassify = createBashClassifyRunner(config.bashClassify);
 
 	let currentMode: string | undefined;
 	// Mode active when the last user message was sent. Drives which prompt
@@ -251,7 +251,11 @@ export default function piMode(pi: ExtensionAPI): void {
 				config.bashClassify,
 				currentMode ? config.modes[currentMode]?.classify : undefined,
 			);
-			const graded = await gradeBashUnits(targets, maps, config.bashClassify.fallback, bashClassify);
+			const gradeFallback: GradeAction =
+				config.bashClassify.fallback === "allow" || config.bashClassify.fallback === "deny"
+					? config.bashClassify.fallback
+					: "ask";
+			const graded = await gradeBashUnits(targets, maps, gradeFallback, bashClassify);
 			const needsLlm = graded.filter((g) => g.action === "model").map((g) => g.unit);
 			const rest = graded.filter((g) => g.action !== "model").map((g) => g.action as Action);
 			if (needsLlm.length > 0) {
@@ -359,11 +363,9 @@ export default function piMode(pi: ExtensionAPI): void {
 		approvals.clear();
 		classifyCache.clear();
 		agentsMd = "";
-		const entries = ctx.sessionManager.getEntries();
-		const stateEntry = entries
-			.filter((e: { type: string; customType?: string }) => e.type === "custom" && e.customType === STATE_ENTRY)
-			.pop() as { data?: { mode?: string } } | undefined;
-		const persisted = stateEntry?.data?.mode;
+		// Walk the active branch (leaf → root), not file order: after a rewind
+		// the file tail may hold state entries from an abandoned branch.
+		const persisted = findPersistedMode(ctx.sessionManager.getBranch());
 
 		const flagMode = pi.getFlag("pi-mode");
 		const isValid = (n: unknown): n is string => typeof n === "string" && !!config.modes[n];

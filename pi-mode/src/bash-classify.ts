@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import type { Action, BashClass, BashRisk, ClassifyMap, GradeAction } from "./config.ts";
+import { gradeExpression } from "./grade/grade.ts";
 
 export interface BashClassifyResult {
 	classification: BashClass | string;
@@ -46,7 +47,20 @@ export function parseBashClassifyJson(raw: string): BashClassifyResult {
 
 const RUN_TIMEOUT_MS = 8000;
 
-export function createBashClassifyRunner(command: string): BashClassifyRunner {
+/** In-process port of bash-classify (unbash + the command database). */
+export function createBuiltinRunner(): BashClassifyRunner {
+	return async (expression) => {
+		const grade = gradeExpression(expression);
+		return { classification: grade.classification, risk: grade.risk, expression };
+	};
+}
+
+export function createBashClassifyRunner(config: { engine: "builtin" | "cli"; command: string }): BashClassifyRunner {
+	if (config.engine === "builtin") return createBuiltinRunner();
+	return createCliRunner(config.command);
+}
+
+function createCliRunner(command: string): BashClassifyRunner {
 	const argv = command.trim().split(/\s+/).filter(Boolean);
 	const bin = argv[0] ?? "bash-classify";
 	const args = argv.slice(1);
