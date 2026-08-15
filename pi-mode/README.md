@@ -181,7 +181,7 @@ Non-interactive sessions (`!ctx.hasUI`) deny on `ask` (fail-closed).
 
 Triggered only when a bash unit/surface resolves to `classify` (e.g. auto mode).
 
-- Model: `model.model` via `modelRegistry.complete`
+- Model: `model.model` (`provider/modelId[:thinkingLevel]`) via `modelRegistry.complete`
 - Context: classifier prompt + loaded `AGENTS.md` + last 3 user messages + whole original command + the uncertain unit(s)
 - Verdicts: `model.verdicts` (default `allow`/`deny`); on error/unparseable → `model.fallback` (default `deny`)
 - Session cache when `model.cache` is true; `model.fallbackModels` tried in order first

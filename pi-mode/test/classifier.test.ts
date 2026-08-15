@@ -7,23 +7,10 @@ import {
 	mergeClassifierVerdicts,
 	normalizeCacheKey,
 	parseClassifierVerdict,
-	parseModelRef,
 } from "../src/classifier.ts";
 import { DEFAULT_CONFIG } from "../src/config.ts";
 
 const cfg = DEFAULT_CONFIG.model;
-
-describe("parseModelRef", () => {
-	it("splits provider/id", () => {
-		expect(parseModelRef("anthropic/claude-haiku-4-5")).toEqual({
-			provider: "anthropic",
-			modelId: "claude-haiku-4-5",
-		});
-		expect(parseModelRef("debug/mock")).toEqual({ provider: "debug", modelId: "mock" });
-		expect(parseModelRef("noshift")).toBeNull();
-		expect(parseModelRef("/bare")).toBeNull();
-	});
-});
 
 describe("parseClassifierVerdict", () => {
 	const v = ["allow", "deny"];

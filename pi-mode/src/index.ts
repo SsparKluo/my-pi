@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import {
+	resolveModelScopeWithDiagnostics,
+	type ExtensionAPI,
+	type ExtensionContext,
+	type ModelRuntime,
+} from "@earendil-works/pi-coding-agent";
 import { Key, Text } from "@earendil-works/pi-tui";
 import { showAskDialog } from "./ask.ts";
 import { evaluateBashCommand } from "./bash.ts";
@@ -13,7 +18,6 @@ import {
 	classifyCommands,
 	collectAgentsMd,
 	lastUserTexts,
-	parseModelRef,
 } from "./classifier.ts";
 import { getConfigPath, loadConfig, type Action, type GradeAction, type PiModeConfig } from "./config.ts";
 import { reportHerdrMode, setHerdrBlocked } from "./herdr.ts";
@@ -315,12 +319,11 @@ export default function piMode(pi: ExtensionAPI): void {
 			verdicts: override?.verdicts ?? config.model.verdicts,
 			fallback: override?.fallback ?? config.model.fallback,
 		};
-		const chain = [classifier.model, ...(classifier.fallbackModels ?? [])]
-			.map((candidate) => {
-				const parsed = parseModelRef(candidate);
-				return parsed ? ctx.modelRegistry.find(parsed.provider, parsed.modelId) : undefined;
-			})
-			.filter((m): m is NonNullable<typeof m> => !!m && ctx.modelRegistry.hasConfiguredAuth(m));
+		const { scopedModels } = await resolveModelScopeWithDiagnostics(
+			[classifier.model, ...(classifier.fallbackModels ?? [])],
+			{ getAvailable: async () => ctx.modelRegistry.getAvailable() } as unknown as ModelRuntime,
+		);
+		const chain = scopedModels.filter((s) => ctx.modelRegistry.hasConfiguredAuth(s.model));
 		return classifyCommands({
 			config: classifier,
 			wholeCommand,
@@ -333,13 +336,13 @@ export default function piMode(pi: ExtensionAPI): void {
 				for (const candidate of chain) {
 					try {
 						const result = await ctx.modelRegistry.complete(
-							candidate,
+							candidate.model,
 							{
 								systemPrompt: call.systemPrompt,
 								messages: [{ role: "user", content: call.userContent, timestamp: Date.now() }],
 							},
 							{
-								reasoningEffort: "low",
+								reasoningEffort: candidate.thinkingLevel ?? "low",
 								cacheRetention: "none",
 								sessionId: randomUUID(),
 								signal: ctx.signal,

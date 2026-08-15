@@ -6,12 +6,6 @@ deny if the command could destroy data, exfiltrate secrets, escalate privileges,
 allow routine read-only inspection or project-local work.
 ask only if ask is an allowed verdict and you cannot decide.`;
 
-export function parseModelRef(ref: string): { provider: string; modelId: string } | null {
-	const slash = ref.indexOf("/");
-	if (slash <= 0 || slash === ref.length - 1) return null;
-	return { provider: ref.slice(0, slash), modelId: ref.slice(slash + 1) };
-}
-
 export function normalizeCacheKey(command: string): string {
 	return command.trim().replace(/\s+/g, " ");
 }

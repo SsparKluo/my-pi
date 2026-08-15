@@ -231,7 +231,7 @@ JSONC (comments + trailing commas). Lives in the agent dir (respects `PI_AGENT_D
 | `bashClassify.byRisk` / `byClass` | Grade maps: verdict per risk/class. Value `model` defers the unit to the small LLM |
 | `bashClassify.fallback` | Used when the CLI fails or a verdict maps to nothing (default `ask`) |
 | `bashClassify.wholeCommandThreshold` | If more units need grading than this, grade the whole command |
-| `model.model` | Small LLM for deferred units (`provider/modelId`) |
+| `model.model` | Small LLM (`provider/modelId` or `provider/modelId:thinkingLevel`) |
 | `model.fallbackModels` | Tried in order when the primary model fails / is unauthenticated |
 | `model.verdicts` | Allowed LLM answers (default `allow`/`deny`; omit `ask` for hands-off) |
 | `model.fallback` | Used on error / unparseable (default `deny`) |
