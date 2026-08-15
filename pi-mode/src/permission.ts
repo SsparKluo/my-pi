@@ -237,10 +237,7 @@ export function sessionApprovalHint(verdict: PermissionVerdict, cwd: string): Se
 		const units = verdict.askUnits && verdict.askUnits.length > 0 ? verdict.askUnits : [verdict.subject];
 		return {
 			tool,
-			targets: units.map((unit) => {
-				const paths = extractCommandPaths(unit).map((p) => describePath(p, cwd));
-				return { display: unit, external: paths.some((p) => p.external) };
-			}),
+			targets: units.map((unit) => ({ display: unit, external: false })),
 		};
 	}
 	return { tool, targets: [] };
@@ -259,19 +256,6 @@ export function describePath(subject: string, cwd: string): { display: string; e
 	const rel = relative(cwd, abs).replace(/\\/g, "/");
 	const external = !rel || rel === ".." || rel.startsWith("../") || isAbsolute(rel);
 	return { display: external ? absPosix : rel, external };
-}
-
-function extractCommandPaths(command: string): string[] {
-	const tokens = command.split(/[\s;|&<>()]+/).filter(Boolean);
-	return tokens.slice(1).filter(looksLikePath);
-}
-
-function looksLikePath(token: string): boolean {
-	if (token.startsWith("-")) return false;
-	if (token === "~" || token.startsWith("~/") || token.startsWith("/") || token.startsWith("./") || token.startsWith("../")) {
-		return true;
-	}
-	return token.includes("/");
 }
 
 export class SessionApprovals {

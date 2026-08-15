@@ -261,7 +261,7 @@ describe("sessionApprovalHint", () => {
 		});
 	});
 
-	it("lists every unbash ask unit, and flags a unit that touches an external path", () => {
+	it("lists every unbash ask unit without external flagging (bash is not path-gated)", () => {
 		const hint = sessionApprovalHint(
 			{
 				action: "ask",
@@ -277,7 +277,7 @@ describe("sessionApprovalHint", () => {
 			tool: "bash",
 			targets: [
 				{ display: "git push origin", external: false },
-				{ display: "sudo cat /etc/hosts", external: true },
+				{ display: "sudo cat /etc/hosts", external: false },
 			],
 		});
 	});
