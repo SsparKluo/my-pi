@@ -33,27 +33,60 @@ export function mergeClassifierVerdicts(verdicts: Action[], fallback: Action): A
 	return fallback;
 }
 
+/** Join whatever context files pi already loaded (AGENTS.md / CLAUDE.md / overrides). */
 export function collectAgentsMd(files: { path: string; content: string }[] | undefined): string {
-	if (!files) return "";
-	return files
-		.filter((f) => /(^|\/)AGENTS\.md$/i.test(f.path.replace(/\\/g, "/")))
-		.map((f) => f.content)
-		.join("\n\n");
+	if (!files?.length) return "";
+	return files.map((f) => f.content).join("\n\n");
 }
 
-export function lastUserTexts(branch: { type: string; message?: { role?: string; content?: unknown } }[]): string[] {
-	const texts: string[] = [];
+const AGENT_REPLY_CAP = 2000;
+
+export interface ConversationWindow {
+	previousUser?: string;
+	previousAssistant?: string;
+	currentUser?: string;
+}
+
+/** Previous user + last assistant text (capped) + current user. Ignores the in-progress turn. */
+export function conversationWindow(
+	branch: { type: string; message?: { role?: string; content?: unknown } }[],
+): ConversationWindow {
+	const msgs: { role: "user" | "assistant"; text: string }[] = [];
 	for (const entry of branch) {
-		if (entry.type !== "message" || entry.message?.role !== "user") continue;
+		const role = entry.message?.role;
+		if (entry.type !== "message" || !entry.message || (role !== "user" && role !== "assistant")) continue;
 		const text = contentToText(entry.message.content);
-		if (text) texts.push(text);
+		if (text) msgs.push({ role, text });
 	}
-	return texts.slice(-3);
+	let lastUser = -1;
+	for (let i = msgs.length - 1; i >= 0; i--) {
+		if (msgs[i].role === "user") {
+			lastUser = i;
+			break;
+		}
+	}
+	if (lastUser < 0) return {};
+	const out: ConversationWindow = { currentUser: msgs[lastUser].text };
+	for (let i = lastUser - 1; i >= 0; i--) {
+		if (!out.previousAssistant && msgs[i].role === "assistant") {
+			out.previousAssistant = tail(msgs[i].text, AGENT_REPLY_CAP);
+			continue;
+		}
+		if (msgs[i].role === "user") {
+			out.previousUser = msgs[i].text;
+			break;
+		}
+	}
+	return out;
+}
+
+function tail(text: string, cap: number): string {
+	return text.length <= cap ? text : text.slice(-cap);
 }
 
 export function buildClassifierUserContent(opts: {
 	agentsMd: string;
-	userMessages: string[];
+	conversation: ConversationWindow;
 	wholeCommand: string;
 	target: string;
 	verdicts?: string[];
@@ -62,9 +95,11 @@ export function buildClassifierUserContent(opts: {
 	if (opts.agentsMd.trim()) {
 		parts.push("## AGENTS.md", opts.agentsMd.trim());
 	}
-	if (opts.userMessages.length > 0) {
-		parts.push("## Recent user messages", opts.userMessages.map((m, i) => `${i + 1}. ${m}`).join("\n"));
-	}
+	const lines: string[] = [];
+	if (opts.conversation.previousUser) lines.push(`user: ${opts.conversation.previousUser}`);
+	if (opts.conversation.previousAssistant) lines.push(`assistant: ${opts.conversation.previousAssistant}`);
+	if (opts.conversation.currentUser) lines.push(`user: ${opts.conversation.currentUser}`);
+	if (lines.length > 0) parts.push("## Conversation", lines.join("\n"));
 	parts.push("## Full command (context)", opts.wholeCommand);
 	parts.push("## Classify this", opts.target);
 	const verdicts = opts.verdicts?.length ? opts.verdicts : ["allow", "deny"];
@@ -82,7 +117,7 @@ export async function classifyCommands(opts: {
 	wholeCommand: string;
 	targets: string[];
 	agentsMd: string;
-	userMessages: string[];
+	conversation: ConversationWindow;
 	cache: Map<string, Action>;
 	complete: (call: ClassifierCall) => Promise<string>;
 }): Promise<Action> {
@@ -109,7 +144,7 @@ export async function classifyCommands(opts: {
 					systemPrompt,
 					userContent: buildClassifierUserContent({
 						agentsMd: opts.agentsMd,
-						userMessages: opts.userMessages,
+						conversation: opts.conversation,
 						wholeCommand: opts.wholeCommand,
 						target,
 						verdicts: opts.config.verdicts,

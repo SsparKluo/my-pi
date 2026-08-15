@@ -17,7 +17,7 @@ import {
 import {
 	classifyCommands,
 	collectAgentsMd,
-	lastUserTexts,
+	conversationWindow,
 } from "./classifier.ts";
 import { getConfigPath, loadConfig, type Action, type GradeAction, type PiModeConfig } from "./config.ts";
 import { reportHerdrMode, setHerdrBlocked } from "./herdr.ts";
@@ -329,7 +329,7 @@ export default function piMode(pi: ExtensionAPI): void {
 			wholeCommand,
 			targets,
 			agentsMd,
-			userMessages: lastUserTexts(ctx.sessionManager.getBranch()),
+			conversation: conversationWindow(ctx.sessionManager.getBranch()),
 			cache: classifyCache,
 			complete: async (call) => {
 				let lastError: unknown = new Error("classifier model unavailable");

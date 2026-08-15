@@ -44,7 +44,7 @@ AI bash classifier.
 | Q7 | Ask dialog = custom TUI (`ctx.ui.custom`); codeblock, foldable, max-height internal scroll; session approvals record the matched pattern; fail-closed non-interactive deny. |
 | §38 | `unbash` parses bash to AST before classification. |
 | §47 | Transparent wrappers (`rtk`, …) stripped; hiding wrappers (`eval`, `sudo`, …) → fail-closed ask. |
-| §60 | Classifier context = whole original command + `AGENTS.md` + last 3 user messages. |
+| §60 | Classifier context = whole original command + pi-loaded agents files + previous user / last assistant / current user. |
 | §61/63 | Cascade: unbash units for deterministic verdicts; classify ≤threshold uncertain units (whole command as context); else (>threshold or unbash fails) classify whole command. |
 
 ## 3. Configuration schema
@@ -221,7 +221,7 @@ Triggered only when a bash unit/surface resolves to `classify`.
   cacheRetention:"none", sessionId: fresh })`. Read text content.
 - **Context**:
   - system: classifier instructions (built-in default or `model.prompt`).
-  - `AGENTS.md` (captured at `before_agent_start` from pi's loaded context files, cached).
+  - Agents files (whatever pi put in `systemPromptOptions.contextFiles`, cached at `before_agent_start`).
   - last 3 **user** messages (`ctx.sessionManager.getBranch()` filtered).
   - the **whole original command** (context).
   - request: the **uncertain unit(s)** (≤threshold case) OR the whole command

@@ -3,7 +3,7 @@ import {
 	buildClassifierUserContent,
 	classifyCommands,
 	collectAgentsMd,
-	lastUserTexts,
+	conversationWindow,
 	mergeClassifierVerdicts,
 	normalizeCacheKey,
 	parseClassifierVerdict,
@@ -37,36 +37,55 @@ describe("mergeClassifierVerdicts", () => {
 });
 
 describe("context helpers", () => {
-	it("collects AGENTS.md and the last 3 user texts", () => {
+	it("joins every file pi already loaded, without re-filtering names", () => {
 		expect(
 			collectAgentsMd([
-				{ path: "/proj/AGENTS.md", content: "root" },
-				{ path: "/proj/src/notes.md", content: "nope" },
-				{ path: "/proj/nested/AGENTS.md", content: "nested" },
+				{ path: "/home/.pi/agent/AGENTS.md", content: "global" },
+				{ path: "/proj/CLAUDE.md", content: "project" },
 			]),
-		).toBe("root\n\nnested");
-		expect(
-			lastUserTexts([
-				{ type: "message", message: { role: "assistant", content: "no" } },
-				{ type: "message", message: { role: "user", content: "one" } },
-				{ type: "message", message: { role: "user", content: [{ type: "text", text: "two" }] } },
-				{ type: "custom" },
-				{ type: "message", message: { role: "user", content: "three" } },
-				{ type: "message", message: { role: "user", content: "four" } },
-			]),
-		).toEqual(["two", "three", "four"]);
+		).toBe("global\n\nproject");
+		expect(collectAgentsMd(undefined)).toBe("");
 	});
 
-	it("builds a prompt that includes agents, history, whole command, and the target", () => {
+	it("takes previous user + last assistant text + current user, ignoring the in-progress turn", () => {
+		expect(
+			conversationWindow([
+				{ type: "message", message: { role: "user", content: "older" } },
+				{ type: "message", message: { role: "user", content: "previous" } },
+				{ type: "message", message: { role: "assistant", content: "tool only" } },
+				{ type: "message", message: { role: "assistant", content: "I will push" } },
+				{ type: "custom" },
+				{ type: "message", message: { role: "user", content: [{ type: "text", text: "ok do it" }] } },
+				{ type: "message", message: { role: "assistant", content: "running now" } },
+			]),
+		).toEqual({
+			previousUser: "previous",
+			previousAssistant: "I will push",
+			currentUser: "ok do it",
+		});
+	});
+
+	it("caps the previous assistant reply from the end", () => {
+		const long = "x".repeat(2500);
+		const win = conversationWindow([
+			{ type: "message", message: { role: "user", content: "a" } },
+			{ type: "message", message: { role: "assistant", content: long } },
+			{ type: "message", message: { role: "user", content: "b" } },
+		]);
+		expect(win.previousAssistant).toHaveLength(2000);
+		expect(win.previousAssistant).toBe(long.slice(-2000));
+	});
+
+	it("builds a prompt that includes agents, conversation, whole command, and the target", () => {
 		const text = buildClassifierUserContent({
 			agentsMd: "be careful",
-			userMessages: ["run tests"],
+			conversation: { currentUser: "run tests" },
 			wholeCommand: "ls && rm -rf /",
 			target: "rm -rf /",
 		});
 		expect(text).toContain("## AGENTS.md");
 		expect(text).toContain("be careful");
-		expect(text).toContain("1. run tests");
+		expect(text).toContain("user: run tests");
 		expect(text).toContain("ls && rm -rf /");
 		expect(text).toContain("## Classify this");
 		expect(text).toContain("rm -rf /");
@@ -87,7 +106,7 @@ describe("classifyCommands", () => {
 				wholeCommand: "ls &&  ls",
 				targets: [target],
 				agentsMd: "",
-				userMessages: [],
+				conversation: {},
 				cache,
 				complete,
 			});
@@ -103,7 +122,7 @@ describe("classifyCommands", () => {
 			wholeCommand: "ls",
 			targets: ["ls"],
 			agentsMd: "",
-			userMessages: [],
+			conversation: {},
 			cache: new Map(),
 			complete: async () => {
 				throw new Error("offline");
@@ -116,7 +135,7 @@ describe("classifyCommands", () => {
 			wholeCommand: "ls",
 			targets: ["ls"],
 			agentsMd: "",
-			userMessages: [],
+			conversation: {},
 			cache: new Map(),
 			complete: async () => "not a verdict",
 		});
@@ -133,7 +152,7 @@ describe("classifyCommands", () => {
 			wholeCommand: "ls && rm foo",
 			targets: ["ls", "rm foo"],
 			agentsMd: "",
-			userMessages: [],
+			conversation: {},
 			cache: new Map(),
 			complete: async (call) => {
 				const target = call.userContent.match(/## Classify this\n+([^\n]+)/)?.[1] ?? "";
@@ -150,7 +169,7 @@ describe("classifyCommands", () => {
 			wholeCommand: "ls && ls",
 			targets: ["ls", "  ls  "],
 			agentsMd: "",
-			userMessages: [],
+			conversation: {},
 			cache: new Map(),
 			complete: async () => {
 				calls += 1;
@@ -172,7 +191,7 @@ describe("classifyCommands", () => {
 			wholeCommand: "ls",
 			targets: ["ls"],
 			agentsMd: "",
-			userMessages: [],
+			conversation: {},
 			cache: new Map(),
 			complete,
 		};
