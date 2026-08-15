@@ -42,7 +42,11 @@
           "*.env.*": "ask",
           "*.env.example": "allow"
         },
-        "externalPath": "ask",
+        "externalPath": {
+          "*": "ask",
+          "/dev/null": "allow",
+          "/tmp/**": "allow"
+        },
         "bash": "classify"
       }
     }
