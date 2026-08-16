@@ -191,7 +191,7 @@ export function computeTurnStats(
 
 export interface HeaderRenderData {
     gitStatus: GitStatus | null;
-    /** Active pi-mode label (e.g. "⏸ plan"), already styled. Omitted in default mode. */
+    /** Active pi-mode label (e.g. "◆ plan"), already styled. Always set once a mode is active. */
     piModeStatus?: string;
 }
 
@@ -209,7 +209,7 @@ export function buildStatusHeader(
     const parts: string[] = [];
     const sep = theme.fg("borderMuted", " \u2502 ");
 
-    // 0. Active pi-mode (e.g. ⏸ plan) — shown only when a non-default mode is active
+    // 0. Active pi-mode (e.g. ◆ plan)
     if (data.piModeStatus) {
         parts.push(data.piModeStatus);
     }

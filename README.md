@@ -118,7 +118,7 @@ Syntax: `provider/modelId[:thinkingLevel]`. Valid levels: `off`, `minimal`, `low
 
 Footer line 1/2 also surface other extensions' `ctx.ui.setStatus` values:
 
-- `pi-mode` — e.g. `plan`, `auto`, `yolo`
+- `pi-mode` — `◆ <mode>`, red for hands-off (`auto`/`full`/`yolo`), yellow for write-restricted (`plan`/`restrict`)
 - `magic-context` — usage / state string
 
 ---
