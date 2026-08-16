@@ -39,6 +39,15 @@ describe("parseConfig", () => {
 		expect(withoutNormal.defaultMode).toBe("plan");
 	});
 
+	it("keeps the internal flag and coerces it to a boolean", () => {
+		const cfg = parseConfig({
+			modes: { normal: {}, goal: { internal: true }, ghost: { internal: "yes" } },
+		});
+		expect(cfg.modes.goal?.internal).toBe(true);
+		expect(cfg.modes.ghost?.internal).toBe(true);
+		expect(cfg.modes.normal?.internal).toBeUndefined();
+	});
+
 	it("keeps valid custom actions", () => {
 		const cfg = parseConfig({
 			modes: {

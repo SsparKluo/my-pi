@@ -36,6 +36,8 @@ export interface ModeConfig {
 	onExitPrompt?: string | null;
 	perTurnPrompt?: string | null;
 	permission?: PermissionRules;
+	/** Hide from selector/cycle and reject user switches — reserved for programmatic entry (e.g. /goal). */
+	internal?: boolean;
 	/** Per-mode overlay on the bash-classify maps. */
 	classify?: ClassifyMap;
 	/** Per-mode overlay on the model classifier. */
@@ -182,6 +184,7 @@ function sanitizeModes(modes: Record<string, ModeConfig>): Record<string, ModeCo
 		const permission = mode?.permission;
 		out[name] = {
 			...mode,
+			internal: mode?.internal === undefined ? undefined : !!mode.internal,
 			permission: permission
 				? Object.fromEntries(
 						Object.entries(permission).map(([surface, rule]) => [surface, sanitizeSurfaceRule(rule)]),

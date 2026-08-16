@@ -213,6 +213,7 @@ JSONC (comments + trailing commas). Lives in the agent dir (respects `PI_AGENT_D
 | `modes.<name>.permission` | Optional. Omit = prompt-only mode. Surfaces × actions (below) |
 | `modes.<name>.classify` | Per-mode overlay on the bashClassify grade maps |
 | `modes.<name>.model` | Per-mode overlay on the model classifier (verdicts / fallback) |
+| `modes.<name>.internal` | `true` = hidden from selector/cycle, rejects `/mode <name>` and `--pi-mode`; programmatic entry only |
 | `bashClassify.command` | CLI invoked per bash unit (stdin → JSON `{classification, risk}`) |
 | `bashClassify.byRisk` / `byClass` | Grade maps: verdict per risk/class. Value `model` defers the unit to the small LLM |
 | `bashClassify.fallback` | Used when the CLI fails or a verdict maps to nothing (default `ask`) |

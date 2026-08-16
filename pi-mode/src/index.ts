@@ -96,10 +96,19 @@ export default function piMode(pi: ExtensionAPI): void {
 		pi.setActiveTools(next.active);
 	}
 
-	function switchTo(ctx: ExtensionContext, name: string): boolean {
-		if (!config.modes[name]) {
-			const available = Object.keys(config.modes).join(", ") || "(none defined)";
+	function switchTo(
+		ctx: ExtensionContext,
+		name: string,
+		opts?: { internal?: boolean },
+	): boolean {
+		const mode = config.modes[name];
+		if (!mode) {
+			const available = switchableModeNames().join(", ") || "(none defined)";
 			ctx.ui.notify(`Unknown mode "${name}". Available: ${available}`, "error");
+			return false;
+		}
+		if (mode.internal && !opts?.internal) {
+			ctx.ui.notify(`"${name}" is internal — reserved for programmatic use (e.g. /goal)`, "error");
 			return false;
 		}
 		if (name === currentMode) {
@@ -110,12 +119,20 @@ export default function piMode(pi: ExtensionAPI): void {
 		return true;
 	}
 
+	/** All mode names, including internal ones. */
 	function modeNames(): string[] {
 		return Object.keys(config.modes);
 	}
 
+	/** User-reachable modes: internal modes are hidden from selector / cycle / /mode / --pi-mode. */
+	function switchableModeNames(): string[] {
+		return Object.entries(config.modes)
+			.filter(([, mode]) => !mode?.internal)
+			.map(([name]) => name);
+	}
+
 	async function showSelector(ctx: ExtensionContext): Promise<void> {
-		const names = modeNames();
+		const names = switchableModeNames();
 		if (names.length === 0) {
 			ctx.ui.notify(`No modes defined in ${getConfigPath()}`, "warning");
 			return;
@@ -141,7 +158,7 @@ export default function piMode(pi: ExtensionAPI): void {
 	pi.registerShortcut(Key.ctrlShift("m"), {
 		description: "Cycle pi-mode",
 		handler: async (ctx) => {
-			const names = modeNames();
+			const names = switchableModeNames();
 			if (names.length === 0) return;
 			const idx = currentMode ? names.indexOf(currentMode) : -1;
 			const next = names[(idx + 1) % names.length];
@@ -360,12 +377,16 @@ export default function piMode(pi: ExtensionAPI): void {
 		const persisted = findPersistedMode(ctx.sessionManager.getBranch());
 
 		const flagMode = pi.getFlag("pi-mode");
-		const isValid = (n: unknown): n is string => typeof n === "string" && !!config.modes[n];
+		// --pi-mode is a user trigger: internal modes and unknown names both fall through.
+		const isValid = (n: unknown): n is string =>
+			typeof n === "string" && !!config.modes[n] && !config.modes[n]?.internal;
+		// Persisted state was written programmatically; internal modes restore normally.
+		const isRestorable = (n: unknown): n is string => typeof n === "string" && !!config.modes[n];
 
 		if (isValid(flagMode)) {
 			// Explicit --pi-mode flag: first message announces onEnter.
 			setMode(ctx, flagMode, { reason: "switch", persist: true });
-		} else if (isValid(persisted)) {
+		} else if (isRestorable(persisted)) {
 			// Resume: mode was already active → first message gets perTurn, not onEnter.
 			setMode(ctx, persisted, { reason: "resume", persist: false });
 			lastSentMode = persisted;

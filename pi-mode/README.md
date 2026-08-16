@@ -46,7 +46,7 @@ Shipped modes (all standalone — no inheritance between modes; what you write i
 | **yolo** | `{}` — no `permission` block at all, so no gating: nothing ever asks. |
 | **auto** | normal's gates; risky bash (`EXTERNAL_EFFECTS`/`DANGEROUS`/`UNKNOWN`) defers to the small LLM instead of asking; `rm` still asks. |
 
-Omit `permission` for vanilla pi. Modes are config-defined — add your own freely.
+Omit `permission` for vanilla pi. Modes are config-defined — add your own freely. `internal: true` modes are user-unreachable (`/mode`, selector, cycle, `--pi-mode` all reject/hide them) and exist for programmatic features (e.g. a future `/goal`).
 
 **bash grading.** The `classify` action grades in-process (TS port of
 [bash-classify](https://github.com/fprochazka/bash-classify)'s database on top of
@@ -89,7 +89,9 @@ to the in-memory default (`normal` mode, no permission).
       "perTurnPrompt": "…" | null,   // emitted (invisible, model-only) before each user message while active
       "permission": {                // OPTIONAL — omit for a prompt-only mode
         "<surface>": "<action>" | { "<pattern>": "<action>", ... }
-      }
+      },
+      "internal": false              // true = user-unreachable: hidden from selector/cycle,
+                                     // /mode <name> and --pi-mode reject it (programmatic entry only)
     }
   },
   "bashClassify": {                  // grades units for `classify`
