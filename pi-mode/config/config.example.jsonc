@@ -44,6 +44,7 @@
         },
         "externalPath": {
           "*": "ask",
+          "~/.agents/skills/**": "allow",
           "/dev/null": "allow",
           "/tmp/**": "allow"
         },
