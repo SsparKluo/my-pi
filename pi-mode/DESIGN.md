@@ -10,10 +10,13 @@ A pi coding-agent extension implementing a **mode-switcher**. A *mode* bundles a
 permission policy, prompts injected on enter/exit/per-turn, and (optionally) an
 AI bash classifier.
 
-- Modes are **config-defined** (arbitrary set, not a hardcoded enum).
-  Ship a single **`default`** mode in the written template: no prompts, in-workspace
-  tools allowed (except reading `.env`), bash via bash-classify (`READONLY` +
-  `LOCAL_EFFECTS` allow, else ask). Omit `permission` for vanilla pi.
+- Modes are **config-defined** (arbitrary set, not a hardcoded enum) and
+  **standalone** — no inheritance; each mode's `permission` is exactly what is
+  written. The written template ships **normal / plan / yolo / auto**: normal
+  gates in-workspace tools (except reading `.env`), bash via bash-classify
+  (`READONLY` + `LOCAL_EFFECTS` allow, else ask); plan additionally denies
+  `write`/`edit` except `**/*.md`; yolo omits `permission` entirely (vanilla pi,
+  nothing asks); auto defers risky bash to the small LLM instead of asking.
 - **Everything configurable**: permission rules, prompts, classifier model,
   command wrappers, thresholds.
 - Config file: **`~/.pi/agent/pi-mode-config.jsonc`** (JSONC, inside the agent
@@ -23,9 +26,8 @@ AI bash classifier.
 - **Notify other components on mode change** (and at startup) so UI components
   can render based on the mode.
 - **Permission control is optional per mode** — a mode may do prompt-injection
-  only (omit the `permission` block). `default` without `permission` is vanilla
-  pi. Other modes inherit `default`'s rules (or all-allow if it has none), then
-  overwrite listed surfaces / patterns.
+  only (omit the `permission` block). A mode without `permission` is vanilla
+  pi: no gating at all.
 - **Bash is parsed via `unbash` (AST)** before any AI classification.
 - Standalone (no third-party permission package); adopt the flat permission
   *format* from `@gotgenes/pi-permission-system`.
@@ -35,7 +37,7 @@ AI bash classifier.
 
 | Ref | Decision |
 |---|---|
-| Q1 | Config-defined arbitrary modes; shipped default is `default` (no gating). plan/auto are template comments. |
+| Q1 | Config-defined arbitrary modes, standalone (no inheritance); template ships normal/plan/yolo/auto. |
 | Q2 | Standalone; flat permission format (`allow`/`deny`/`ask`/`classify`, last-match-wins). |
 | Q3 | `permission` block optional (omit → prompt-only). `classify` is a first-class action. Global `commandWrappers`. |
 | Q4 | Three optional prompt fields emitted as their own block at send time (never the system prompt — that would bust the KV-cache prefix): `onEnterPrompt`/`onExitPrompt` on a mode change (displayed as a compact label), `perTurnPrompt` while staying in a mode (invisible, model-only). State persisted via session entry. |
@@ -53,7 +55,7 @@ See `config/config.example.jsonc` for the shipped (commented) template.
 
 ```jsonc
 {
-  "defaultMode": "default",                             // startup mode if no flag/persisted state
+  "defaultMode": "normal",                             // startup mode if no flag/persisted state; invalid → `normal`, then first mode
   "commandWrappers": ["rtk","time","nice","command"],   // transparent prefixes stripped before eval
   "modes": {
     "<modeName>": {
@@ -130,7 +132,8 @@ Layers (each an independently runnable/verifiable slice):
 `pi.appendEntry("pi-mode-state", { mode, ts })`. Restored on `session_start`
 (reason `startup`/`resume`/`reload`) via `ctx.sessionManager.getBranch()` — the
 leaf→root walk, so a rewind restores the surviving branch's mode, not the file
-tail's; falls back to `defaultMode` then `default`.
+tail's; falls back to `defaultMode` (normalized at parse: invalid → `normal`,
+then the first mode).
 
 **Switching** (`--pi-mode <name>` flag, `/mode` selector, `/mode <name>`, cycle shortcut)
 only changes mode state — it emits no prompt. The mode's prompt attaches to the
@@ -155,7 +158,7 @@ depends on the mode transition since the last sent message:
   messages become user-role messages in `convertToLlm` regardless of `display`)
   but render nothing;
 - transition blocks are `display: true` and render only a compact label
-  (`⏸ entered plan` / `⏸ left plan`), never the raw prompt text.
+  (`plan → auto`), never the raw prompt text.
 On `session_start` resume, `lastSentMode` is seeded to the restored mode so the
 first message gets `perTurnPrompt` rather than re-announcing `onEnterPrompt`.
 

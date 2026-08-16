@@ -57,16 +57,13 @@ export default function piMode(pi: ExtensionAPI): void {
 	});
 
 	function statusText(): string | undefined {
-		if (!currentMode || currentMode === "default") return undefined;
-		const icon = currentMode === "plan" ? "⏸" : currentMode === "auto" ? "⚡" : "●";
-		return `${icon} ${currentMode}`;
+		return currentMode;
 	}
 
 	function setStatus(ctx: ExtensionContext): void {
 		const text = statusText();
 		if (text) {
-			const color = currentMode === "plan" ? "warning" : "accent";
-			ctx.ui.setStatus("pi-mode", ctx.ui.theme.fg(color, text));
+			ctx.ui.setStatus("pi-mode", ctx.ui.theme.fg("accent", text));
 		} else {
 			ctx.ui.setStatus("pi-mode", undefined);
 		}
@@ -159,8 +156,6 @@ export default function piMode(pi: ExtensionAPI): void {
 
 	type ModePrompt = { prompt: string; kind: "per" | "transition"; from?: string; to: string };
 
-	const modeIcon = (m?: string): string => (m === "plan" ? "⏸" : m === "auto" ? "⚡" : "●");
-
 	/**
 	 * Mode prompt to emit at send time, based on the transition since the last
 	 * sent message: same mode → perTurnPrompt (kind "per"); mode change (or first
@@ -187,10 +182,7 @@ export default function piMode(pi: ExtensionAPI): void {
 	// "per" blocks are display:false so they reach the model but stay invisible.
 	pi.registerMessageRenderer("pi-mode-prompt", (message, _opts, theme) => {
 		const d = message.details as { from?: string; to?: string } | undefined;
-		const to = d?.to;
-		const label = to === "default"
-			? `${modeIcon(d?.from)} left ${d?.from ?? "mode"}`
-			: `${modeIcon(to)} entered ${to ?? "mode"}`;
+		const label = d?.from ? `${d.from} → ${d.to ?? "?"}` : `→ ${d?.to ?? "?"}`;
 		return new Text(theme.fg("muted", label), 0, 0);
 	});
 
@@ -381,9 +373,8 @@ export default function piMode(pi: ExtensionAPI): void {
 			setMode(ctx, persisted, { reason: "resume", persist: false });
 			lastSentMode = persisted;
 		} else {
-			// First start: enter the configured default.
-			const def = config.modes[config.defaultMode] ? config.defaultMode : "default";
-			setMode(ctx, def, { reason: "startup", persist: true });
+			// First start: enter the configured default mode.
+			setMode(ctx, config.defaultMode, { reason: "startup", persist: true });
 		}
 	});
 }

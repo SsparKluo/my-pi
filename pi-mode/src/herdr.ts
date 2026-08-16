@@ -8,10 +8,9 @@ export function isHerdrEnv(): boolean {
 	return process.env.HERDR_ENV === "1" && !!process.env.HERDR_SOCKET_PATH && !!process.env.HERDR_PANE_ID;
 }
 
-/** Agents-panel line 2: `pi · plan`. Hidden for default (vanilla). */
+/** Agents-panel line 2: `pi · <mode>`. Hidden only when no mode is active. */
 export function displayAgentLabel(mode: string | undefined): string | null {
-	if (!mode || mode === "default") return null;
-	return `pi · ${mode}`;
+	return mode ? `pi · ${mode}` : null;
 }
 
 export function setHerdrBlocked(pi: ExtensionAPI, active: boolean, label?: string): void {

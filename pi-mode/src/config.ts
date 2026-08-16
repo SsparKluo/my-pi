@@ -75,7 +75,7 @@ export interface PiModeConfig {
 	ask: AskConfig;
 }
 
-const DEFAULT_MODE = "default";
+const DEFAULT_MODE = "normal";
 
 /** `~/.pi/agent/pi-mode-config.jsonc` (respects PI_AGENT_DIR override). */
 export function getConfigPath(): string {
@@ -89,7 +89,7 @@ export function getExampleConfigPath(): string {
 
 /**
  * Built-in defaults when the file is absent or unreadable.
- * Only `default` — no permission block — so behavior matches vanilla pi.
+ * Only `normal` — no permission block — so behavior matches vanilla pi.
  */
 export const DEFAULT_CONFIG: PiModeConfig = {
 	defaultMode: DEFAULT_MODE,
@@ -117,9 +117,9 @@ export const DEFAULT_CONFIG: PiModeConfig = {
 };
 
 const MINIMAL_TEMPLATE = `{
-  "defaultMode": "default",
+  "defaultMode": "normal",
   "modes": {
-    "default": {}
+    "normal": {}
   }
 }
 `;
@@ -139,71 +139,6 @@ function sanitizeSurfaceRule(rule: SurfaceRule): SurfaceRule {
 	return out;
 }
 
-const OPEN_PERMISSION: PermissionRules = { "*": "allow" };
-
-/** Child surface/pattern keys overwrite the parent; unspecified keys are kept. */
-export function mergePermissionRules(base: PermissionRules, over: PermissionRules): PermissionRules {
-	const out: PermissionRules = { ...base };
-	for (const [surface, rule] of Object.entries(over)) {
-		const prev = out[surface];
-		if (isPatternMap(rule) && isPatternMap(prev)) {
-			out[surface] = { ...prev, ...rule };
-		} else if (isPatternMap(rule) && (prev === undefined || prev === "allow")) {
-			// Open parent + child's partial map: keep unspecified commands allowed.
-			out[surface] = { "*": "allow", ...rule };
-		} else {
-			out[surface] = rule;
-		}
-	}
-	return out;
-}
-
-function isPatternMap(rule: SurfaceRule | undefined): rule is Record<string, Action> {
-	return !!rule && typeof rule === "object" && !Array.isArray(rule);
-}
-
-function mergeClassifyMaps(base?: ClassifyMap, over?: ClassifyMap): ClassifyMap | undefined {
-	if (!base && !over) return undefined;
-	return {
-		byRisk: { ...base?.byRisk, ...over?.byRisk },
-		byClass: { ...base?.byClass, ...over?.byClass },
-	};
-}
-
-function mergeModelOverride(base?: ModelOverride, over?: ModelOverride): ModelOverride | undefined {
-	if (!base && !over) return undefined;
-	return {
-		verdicts: over?.verdicts ?? base?.verdicts,
-		fallback: over?.fallback ?? base?.fallback,
-	};
-}
-
-/** `default` stays as written. Other modes inherit its permission / classify / model overlays (or all-allow if it has none). */
-export function inheritPermissions(modes: Record<string, ModeConfig>): Record<string, ModeConfig> {
-	const parent = modes.default?.permission;
-	const parentClassify = modes.default?.classify;
-	const parentModel = modes.default?.model;
-	const out: Record<string, ModeConfig> = {};
-	for (const [name, mode] of Object.entries(modes)) {
-		if (name === "default") {
-			out[name] = mode;
-			continue;
-		}
-		const child = mode?.permission;
-		if (!parent && !child && !parentClassify && !mode?.classify && !parentModel && !mode?.model) {
-			out[name] = mode;
-			continue;
-		}
-		const base = parent ?? (child ? OPEN_PERMISSION : undefined);
-		out[name] = {
-			...mode,
-			permission: child && base ? mergePermissionRules(base, child) : child ?? (base ? structuredClone(base) : child),
-			classify: mergeClassifyMaps(parentClassify, mode?.classify),
-			model: mergeModelOverride(parentModel, mode?.model),
-		};
-	}
-	return out;
-}
 
 const GRADE_ACTIONS = new Set<GradeAction>(["allow", "deny", "ask", "model"]);
 
@@ -265,7 +200,7 @@ function sanitizeVerdicts(raw: unknown): string[] {
 	return kept.length > 0 ? kept : DEFAULT_CONFIG.model.verdicts;
 }
 
-/** Merge a user-parsed config over defaults and coerce unknown actions to deny. */
+/** Merge a user-parsed config over defaults and coerce unknown actions to deny. Modes are standalone — no inheritance. */
 export function parseConfig(parsed: unknown): PiModeConfig {
 	const p = (parsed ?? {}) as Partial<PiModeConfig>;
 	const rawModes = p.modes;
@@ -273,13 +208,18 @@ export function parseConfig(parsed: unknown): PiModeConfig {
 		rawModes && typeof rawModes === "object" && !Array.isArray(rawModes) && Object.keys(rawModes).length > 0
 			? (rawModes as Record<string, ModeConfig>)
 			: DEFAULT_CONFIG.modes;
+	const sanitized = sanitizeModes(structuredClone(modes));
+	const defaultMode =
+		typeof p.defaultMode === "string" && sanitized[p.defaultMode]
+			? p.defaultMode
+			: sanitized[DEFAULT_MODE] ? DEFAULT_MODE : Object.keys(sanitized)[0] ?? DEFAULT_MODE;
 	const gradeIn = (p.bashClassify ?? {}) as Partial<BashClassifyConfig>;
 	const gradeMaps = sanitizeClassifyMap(gradeIn) ?? {};
 	const modelIn = (p.model ?? {}) as Partial<ModelClassifierConfig>;
 	return {
-		defaultMode: typeof p.defaultMode === "string" ? p.defaultMode : DEFAULT_CONFIG.defaultMode,
+		defaultMode,
 		commandWrappers: Array.isArray(p.commandWrappers) ? p.commandWrappers : DEFAULT_CONFIG.commandWrappers,
-		modes: inheritPermissions(sanitizeModes(structuredClone(modes))),
+		modes: sanitized,
 		bashClassify: {
 			...DEFAULT_CONFIG.bashClassify,
 			...gradeIn,

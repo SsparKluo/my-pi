@@ -37,13 +37,16 @@ pi -e ./src/index.ts
 | `Ctrl+Shift+M` | Cycle modes in config order |
 | `--pi-mode <name>` | Start pi already in that mode |
 
-Shipped mode:
+Shipped modes (all standalone — no inheritance between modes; what you write is what applies):
 
 | Mode | Behavior |
 |------|----------|
-| **default** | No prompts. In-workspace tools allowed (except reading `.env`). bash-classify: `READONLY` + `LOCAL_EFFECTS` allow, else ask. |
+| **normal** | No prompts. In-workspace tools allowed (except reading `.env`). bash-classify: `READONLY` + `LOCAL_EFFECTS` allow, else ask. |
+| **plan** | normal's gates plus `write`/`edit` denied except `**/*.md`. |
+| **yolo** | `{}` — no `permission` block at all, so no gating: nothing ever asks. |
+| **auto** | normal's gates; risky bash (`EXTERNAL_EFFECTS`/`DANGEROUS`/`UNKNOWN`) defers to the small LLM instead of asking; `rm` still asks. |
 
-Omit `permission` for vanilla pi. Extra modes (`plan`, `auto`, …) are yours to add.
+Omit `permission` for vanilla pi. Modes are config-defined — add your own freely.
 
 **bash grading.** The `classify` action grades in-process (TS port of
 [bash-classify](https://github.com/fprochazka/bash-classify)'s database on top of
@@ -54,9 +57,9 @@ bash-classify`; `bashClassify.command` overrides). On failure,
 mapped to `model` go to the small LLM (`model.model`, retried through
 `model.fallbackModels`).
 
-The current mode (when not `default`) is published via `ctx.ui.setStatus("pi-mode", …)` so a custom footer (e.g. my-pi's status extension) can render it. Mode changes also emit `pi-mode:changed` `{ mode, previous, reason }` (`reason` ∈ `startup`/`resume`/`reload`/`switch`).
+The current mode is always published via `ctx.ui.setStatus("pi-mode", …)` so a custom footer (e.g. my-pi's status extension) can render it. Mode changes also emit `pi-mode:changed` `{ mode, previous, reason }` (`reason` ∈ `startup`/`resume`/`reload`/`switch`).
 
-Inside [herdr](https://herdr.sh), a non-`default` mode is reported as the agents-panel
+Inside [herdr](https://herdr.sh), the active mode is reported as the agents-panel
 line 2 label (`pi · plan`). A permission ask emits `herdr:blocked` so the pane
 shows herdr's **blocked** state until the dialog closes.
 
@@ -71,13 +74,13 @@ JSONC (comments + trailing commas). Inside pi's agent dir — respects `PI_AGENT
 
 If the file is missing, pi-mode **writes** the shipped commented template
 (`config/config.example.jsonc`) there on first load. Unreadable files fall back
-to the in-memory default (`default` mode, no permission).
+to the in-memory default (`normal` mode, no permission).
 
 ### Schema
 
 ```jsonc
 {
-  "defaultMode": "default",                             // startup mode if no flag/persisted state
+  "defaultMode": "normal",                             // startup mode if no flag/persisted state; falls back to `normal`, then the first mode
   "commandWrappers": ["rtk","time","nice","command"],   // transparent prefixes stripped before eval
   "modes": {
     "<modeName>": {
@@ -138,7 +141,7 @@ message in both the transcript and the model context.
 | Transition | What is emitted |
 |------------|-----------------|
 | Same mode as last message | `perTurnPrompt` (display: false — model-only) |
-| Mode change / first message | `onExitPrompt`(prev) then `onEnterPrompt`(curr); shown as a compact label (`⏸ entered plan` / `⏸ left plan`) |
+| Mode change / first message | `onExitPrompt`(prev) then `onEnterPrompt`(curr); shown as a compact label (`plan → auto`) |
 
 `onEnterPrompt` and `perTurnPrompt` are mutually exclusive for a given send.
 On session resume, `lastSentMode` is seeded to the restored mode so the first

@@ -8,64 +8,35 @@ import { parseJsonc } from "../src/jsonc.ts";
 describe("parseConfig", () => {
 	it("fills missing top-level fields from defaults", () => {
 		const cfg = parseConfig({});
-		expect(cfg.defaultMode).toBe("default");
-		expect(Object.keys(cfg.modes)).toEqual(["default"]);
-		expect(cfg.modes.default?.permission).toBeUndefined();
+		expect(cfg.defaultMode).toBe("normal");
+		expect(Object.keys(cfg.modes)).toEqual(["normal"]);
+		expect(cfg.modes.normal?.permission).toBeUndefined();
 		expect(cfg.commandWrappers).toEqual(DEFAULT_CONFIG.commandWrappers);
 		expect(cfg.model).toEqual(DEFAULT_CONFIG.model);
 		expect(cfg.ask).toEqual(DEFAULT_CONFIG.ask);
 	});
 
-	it("treats an empty modes object as unconfigured (vanilla default)", () => {
+	it("treats an empty modes object as unconfigured (vanilla normal)", () => {
 		const cfg = parseConfig({ modes: {} });
-		expect(Object.keys(cfg.modes)).toEqual(["default"]);
-		expect(cfg.modes.default?.permission).toBeUndefined();
+		expect(Object.keys(cfg.modes)).toEqual(["normal"]);
+		expect(cfg.modes.normal?.permission).toBeUndefined();
 	});
 
-	it("lets other modes inherit an open default, then overwrite listed surfaces", () => {
+	it("keeps modes standalone — no inherited rules are injected", () => {
 		const cfg = parseConfig({
 			modes: {
-				default: {},
-				build: {
-					permission: {
-						bash: { "rm *": "ask" },
-						edit: "ask",
-					},
-				},
+				normal: { permission: { "*": "ask", read: "allow" } },
+				build: { permission: { bash: { "rm *": "ask" }, edit: "ask" } },
 			},
 		});
-		expect(cfg.modes.default?.permission).toBeUndefined();
-		expect(cfg.modes.build?.permission).toEqual({
-			"*": "allow",
-			edit: "ask",
-			bash: { "*": "allow", "rm *": "ask" },
-		});
+		expect(cfg.modes.build?.permission).toEqual({ bash: { "rm *": "ask" }, edit: "ask" });
 	});
 
-	it("deep-merges a child's permission over default's", () => {
-		const cfg = parseConfig({
-			modes: {
-				default: {
-					permission: {
-						"*": "ask",
-						read: "allow",
-						bash: { "*": "ask", ls: "allow" },
-					},
-				},
-				build: {
-					permission: {
-						edit: "allow",
-						bash: { "rm *": "deny" },
-					},
-				},
-			},
-		});
-		expect(cfg.modes.build?.permission).toEqual({
-			"*": "ask",
-			read: "allow",
-			edit: "allow",
-			bash: { "*": "ask", ls: "allow", "rm *": "deny" },
-		});
+	it("falls back to normal, then the first mode, when defaultMode names a missing mode", () => {
+		const withNormal = parseConfig({ defaultMode: "nromal", modes: { normal: {}, plan: {} } });
+		expect(withNormal.defaultMode).toBe("normal");
+		const withoutNormal = parseConfig({ defaultMode: "gone", modes: { plan: {}, auto: {} } });
+		expect(withoutNormal.defaultMode).toBe("plan");
 	});
 
 	it("keeps valid custom actions", () => {
@@ -102,7 +73,6 @@ describe("parseConfig", () => {
 			},
 		});
 		expect(cfg.modes.typo?.permission).toEqual({
-			"*": "allow",
 			read: "deny",
 			write: { "*": "deny", "**/*.md": "allow" },
 			bash: "deny",
@@ -125,13 +95,13 @@ describe("parseConfig", () => {
 describe("parseJsonc", () => {
 	it("strips line comments, block comments, and trailing commas", () => {
 		const parsed = parseJsonc(`{
-			"defaultMode": "default", // startup
+			"defaultMode": "normal", // startup
 			"modes": {
-				"default": {},
+				"normal": {},
 				/* "plan": {} */
 			},
 		}`);
-		expect(parsed).toEqual({ defaultMode: "default", modes: { default: {} } });
+		expect(parsed).toEqual({ defaultMode: "normal", modes: { normal: {} } });
 	});
 
 	it("does not treat comment markers inside strings as comments", () => {
@@ -139,12 +109,15 @@ describe("parseJsonc", () => {
 		expect(parsed).toEqual({ onEnterPrompt: "see http://x.com /* not a comment */" });
 	});
 
-	it("parses the shipped example as default-only", () => {
+	it("ships normal / plan / yolo / auto as standalone modes", () => {
 		const raw = readFileSync(new URL("../config/config.example.jsonc", import.meta.url), "utf-8");
 		const parsed = parseConfig(parseJsonc(raw));
-		expect(parsed.defaultMode).toBe("default");
-		expect(Object.keys(parsed.modes)).toEqual(["default"]);
-		expect(parsed.modes.default?.permission?.bash).toBe("classify");
+		expect(parsed.defaultMode).toBe("normal");
+		expect(Object.keys(parsed.modes)).toEqual(["normal", "plan", "yolo", "auto"]);
+		expect(parsed.modes.normal?.permission?.bash).toBe("classify");
+		expect(parsed.modes.plan?.permission?.edit).toEqual({ "*": "deny", "**/*.md": "allow" });
+		expect(parsed.modes.yolo?.permission).toBeUndefined();
+		expect(parsed.modes.auto?.permission?.bash).toEqual({ "*": "classify", rm: "ask", "rm *": "ask" });
 		expect(parsed.bashClassify.byClass?.READONLY).toBe("allow");
 		expect(parsed.bashClassify.byClass?.EXTERNAL_EFFECTS).toBe("ask");
 	});
@@ -157,9 +130,9 @@ describe("loadConfigFromFile", () => {
 		const result = loadConfigFromFile(path);
 		expect(result.created).toBe(true);
 		expect(result.error).toBeUndefined();
-		expect(result.config.defaultMode).toBe("default");
-		expect(Object.keys(result.config.modes)).toEqual(["default"]);
-		expect(result.config.modes.default?.permission?.bash).toBe("classify");
+		expect(result.config.defaultMode).toBe("normal");
+		expect(Object.keys(result.config.modes)).toEqual(["normal", "plan", "yolo", "auto"]);
+		expect(result.config.modes.normal?.permission?.bash).toBe("classify");
 		const written = readFileSync(path, "utf-8");
 		expect(written).toContain("//");
 		expect(written).toContain("READONLY");

@@ -1,13 +1,14 @@
 // pi-mode — ~/.pi/agent/pi-mode-config.jsonc
 //
-// Written on first load. One mode: `default`.
-// No prompts. In-workspace tools are allowed (except reading .env).
+// Written on first load. Ships normal / plan / yolo / auto.
+// Modes are STANDALONE: what you write is what applies — no inheritance between modes.
+// Omit `permission` entirely for vanilla pi, no gating at all (that is all `yolo` is).
+// `defaultMode` is the startup mode (--pi-mode flag and persisted session state override it).
 // bash: bash-classify grades, byClass/byRisk pick the verdict; "model" defers to the small LLM.
-// Omit `permission` entirely for vanilla pi (no gating).
 // last-match-wins: later keys overwrite (e.g. "*": "classify", "rm *": "ask").
 
 {
-  "defaultMode": "default",
+  "defaultMode": "normal",
   "commandWrappers": ["rtk", "time", "nice", "command"],
   "bashClassify": {
     "engine": "builtin",
@@ -30,7 +31,8 @@
     "cache": true
   },
   "modes": {
-    "default": {
+    // Gated baseline: in-workspace tools allowed (except reading .env), bash graded.
+    "normal": {
       "onEnterPrompt": null,
       "onExitPrompt": null,
       "perTurnPrompt": null,
@@ -50,6 +52,61 @@
         },
         "bash": "classify"
       }
+    },
+    // Planning: normal's gates plus write/edit locked down except markdown notes.
+    "plan": {
+      "onEnterPrompt": null,
+      "onExitPrompt": null,
+      "perTurnPrompt": null,
+      "permission": {
+        "*": "allow",
+        "read": {
+          "*": "allow",
+          "*.env": "ask",
+          "*.env.*": "ask",
+          "*.env.example": "allow"
+        },
+        "externalPath": {
+          "*": "ask",
+          "~/.agents/skills/**": "allow",
+          "/dev/null": "allow",
+          "/tmp/**": "allow"
+        },
+        "bash": "classify",
+        "write": { "*": "deny", "**/*.md": "allow" },
+        "edit": { "*": "deny", "**/*.md": "allow" }
+      }
+    },
+    // No permission block = no gating, nothing ever asks. True yolo.
+    "yolo": {},
+    // Hands-off: risky bash goes to the small LLM instead of asking; rm still asks.
+    "auto": {
+      "onEnterPrompt": null,
+      "onExitPrompt": null,
+      "perTurnPrompt": null,
+      "classify": {
+        "byClass": {
+          "EXTERNAL_EFFECTS": "model",
+          "DANGEROUS": "model",
+          "UNKNOWN": "model"
+        }
+      },
+      "permission": {
+        "*": "allow",
+        "read": {
+          "*": "allow",
+          "*.env": "ask",
+          "*.env.*": "ask",
+          "*.env.example": "allow"
+        },
+        "externalPath": {
+          "*": "ask",
+          "~/.agents/skills/**": "allow",
+          "/dev/null": "allow",
+          "/tmp/**": "allow"
+        },
+        "bash": { "*": "classify", "rm": "ask", "rm *": "ask" }
+      }
     }
   }
 }
@@ -66,3 +123,4 @@
 // bash/tool patterns = command-prefix globs ("git push *")
 // write/edit/externalPath = file-path globs ("**/*.md"); externalPath only gates paths outside cwd
 // omit permission    = no gating (vanilla pi / prompt-only)
+// no matching rule   = deny (fail-closed): every gated mode needs a "*" baseline
