@@ -30,6 +30,7 @@ import {
 	subjectKind,
 } from "./permission.ts";
 import { findPersistedMode, STATE_ENTRY } from "./restore.ts";
+import { modeStatus } from "./status.ts";
 
 const EVENT_CHANGED = "pi-mode:changed";
 
@@ -56,14 +57,10 @@ export default function piMode(pi: ExtensionAPI): void {
 		type: "string",
 	});
 
-	function statusText(): string | undefined {
-		return currentMode;
-	}
-
 	function setStatus(ctx: ExtensionContext): void {
-		const text = statusText();
-		if (text) {
-			ctx.ui.setStatus("pi-mode", ctx.ui.theme.fg("accent", text));
+		if (currentMode) {
+			const { text, color } = modeStatus(currentMode);
+			ctx.ui.setStatus("pi-mode", ctx.ui.theme.fg(color, text));
 		} else {
 			ctx.ui.setStatus("pi-mode", undefined);
 		}

@@ -57,7 +57,7 @@ bash-classify`; `bashClassify.command` overrides). On failure,
 mapped to `model` go to the small LLM (`model.model`, retried through
 `model.fallbackModels`).
 
-The current mode is always published via `ctx.ui.setStatus("pi-mode", …)` so a custom footer (e.g. my-pi's status extension) can render it. Mode changes also emit `pi-mode:changed` `{ mode, previous, reason }` (`reason` ∈ `startup`/`resume`/`reload`/`switch`).
+The current mode is always published via `ctx.ui.setStatus("pi-mode", …)` — `◆ <mode>`, colored by category: hands-off modes (`auto`, `full`, `yolo`) red, write-restricted modes (`plan`, `restrict`) yellow, everything else accent — so a custom footer (e.g. my-pi's status extension) can render it. Mode changes also emit `pi-mode:changed` `{ mode, previous, reason }` (`reason` ∈ `startup`/`resume`/`reload`/`switch`).
 
 Inside [herdr](https://herdr.sh), the active mode is reported as the agents-panel
 line 2 label (`pi · plan`). A permission ask emits `herdr:blocked` so the pane
@@ -202,6 +202,7 @@ src/
   bash.ts         # unbash cascade: parse → wrapper-strip → unit eval → classifier dispatch
   classifier.ts   # modelRegistry.complete call, context assembly, cache, fallback
   ask.ts          # custom TUI dialog (ctx.ui.custom)
+  status.ts       # footer status text + category color per mode
 ```
 
 Canonical design decisions, bash cascade details, and open follow-ups: see
