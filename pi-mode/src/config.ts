@@ -35,6 +35,8 @@ export interface ModeConfig {
 	onEnterPrompt?: string | null;
 	onExitPrompt?: string | null;
 	perTurnPrompt?: string | null;
+	/** Explicit parent mode: inherit its permission / classify / model policy, then override. */
+	extends?: string;
 	permission?: PermissionRules;
 	/** Hide from selector/cycle and reject user switches — reserved for programmatic entry (e.g. /goal). */
 	internal?: boolean;
@@ -197,13 +199,82 @@ function sanitizeModes(modes: Record<string, ModeConfig>): Record<string, ModeCo
 	return out;
 }
 
+function isPatternMap(rule: SurfaceRule | undefined): rule is Record<string, Action> {
+	return !!rule && typeof rule === "object" && !Array.isArray(rule);
+}
+
+/** Child surface/pattern keys overwrite the parent; unspecified keys are kept. */
+export function mergePermissionRules(base: PermissionRules, over: PermissionRules): PermissionRules {
+	const out: PermissionRules = { ...base };
+	for (const [surface, rule] of Object.entries(over)) {
+		const prev = out[surface];
+		if (isPatternMap(rule) && isPatternMap(prev)) {
+			out[surface] = { ...prev, ...rule };
+		} else if (isPatternMap(rule) && (prev === undefined || prev === "allow")) {
+			// Open parent + child's partial map: keep unspecified commands allowed.
+			out[surface] = { "*": "allow", ...rule };
+		} else {
+			out[surface] = rule;
+		}
+	}
+	return out;
+}
+
+function mergeClassifyMaps(base?: ClassifyMap, over?: ClassifyMap): ClassifyMap | undefined {
+	if (!base && !over) return undefined;
+	return {
+		byRisk: { ...base?.byRisk, ...over?.byRisk },
+		byClass: { ...base?.byClass, ...over?.byClass },
+	};
+}
+
+function mergeModelOverride(base?: ModelOverride, over?: ModelOverride): ModelOverride | undefined {
+	if (!base && !over) return undefined;
+	return {
+		verdicts: over?.verdicts ?? base?.verdicts,
+		fallback: over?.fallback ?? base?.fallback,
+	};
+}
+
+/**
+ * Resolve `extends` chains: each mode inherits its parent's policy
+ * (permission deep-merged, classify/model overlaid; prompts stay its own),
+ * transitively. Unknown parent or cycle → Error → loadConfigFromFile falls
+ * back to defaults. Modes without `extends` are untouched.
+ */
+export function resolveExtends(modes: Record<string, ModeConfig>): Record<string, ModeConfig> {
+	const resolved = new Map<string, ModeConfig>();
+	const resolve = (name: string, seen: Set<string>): ModeConfig => {
+		const memo = resolved.get(name);
+		if (memo) return memo;
+		const mode = modes[name];
+		if (!mode) throw new Error(`pi-mode: "${name}" extends unknown mode`);
+		if (seen.has(name)) throw new Error(`pi-mode: extends cycle at "${name}"`);
+		if (mode.extends === undefined) {
+			resolved.set(name, mode);
+			return mode;
+		}
+		const parent = resolve(mode.extends, new Set(seen).add(name));
+		const merged: ModeConfig = {
+			...mode,
+			permission: mergePermissionRules(parent.permission ?? {}, mode.permission ?? {}),
+			classify: mergeClassifyMaps(parent.classify, mode.classify),
+			model: mergeModelOverride(parent.model, mode.model),
+		};
+		if (merged.permission && Object.keys(merged.permission).length === 0) delete merged.permission;
+		resolved.set(name, merged);
+		return merged;
+	};
+	return Object.fromEntries(Object.keys(modes).map((name) => [name, resolve(name, new Set())]));
+}
+
 function sanitizeVerdicts(raw: unknown): string[] {
 	if (!Array.isArray(raw)) return DEFAULT_CONFIG.model.verdicts;
 	const kept = raw.filter((v): v is string => typeof v === "string" && ACTIONS.has(v as Action));
 	return kept.length > 0 ? kept : DEFAULT_CONFIG.model.verdicts;
 }
 
-/** Merge a user-parsed config over defaults and coerce unknown actions to deny. Modes are standalone — no inheritance. */
+/** Merge a user-parsed config over defaults and coerce unknown actions to deny. `extends` is resolved explicitly; there is no implicit inheritance. */
 export function parseConfig(parsed: unknown): PiModeConfig {
 	const p = (parsed ?? {}) as Partial<PiModeConfig>;
 	const rawModes = p.modes;
@@ -222,7 +293,7 @@ export function parseConfig(parsed: unknown): PiModeConfig {
 	return {
 		defaultMode,
 		commandWrappers: Array.isArray(p.commandWrappers) ? p.commandWrappers : DEFAULT_CONFIG.commandWrappers,
-		modes: sanitized,
+		modes: resolveExtends(sanitized),
 		bashClassify: {
 			...DEFAULT_CONFIG.bashClassify,
 			...gradeIn,

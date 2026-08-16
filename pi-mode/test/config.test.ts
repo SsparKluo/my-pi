@@ -48,6 +48,54 @@ describe("parseConfig", () => {
 		expect(cfg.modes.normal?.internal).toBeUndefined();
 	});
 
+	it("deep-merges a child's permission over its extends parent", () => {
+		const cfg = parseConfig({
+			modes: {
+				normal: { permission: { "*": "allow", read: "allow", bash: { "*": "ask", ls: "allow" } } },
+				plan: { extends: "normal", permission: { write: "deny", bash: { "git push *": "deny" } } },
+			},
+		});
+		expect(cfg.modes.plan?.permission).toEqual({
+			"*": "allow",
+			read: "allow",
+			write: "deny",
+			bash: { "*": "ask", ls: "allow", "git push *": "deny" },
+		});
+	});
+
+	it("resolves extends transitively and keeps prompts per-mode", () => {
+		const cfg = parseConfig({
+			modes: {
+				base: { permission: { "*": "ask" } },
+				mid: { extends: "base", permission: { read: "allow" } },
+				leaf: { extends: "mid", onEnterPrompt: "hi", permission: { grep: "allow" } },
+			},
+		});
+		expect(cfg.modes.leaf?.permission).toEqual({ "*": "ask", read: "allow", grep: "allow" });
+		expect(cfg.modes.leaf?.onEnterPrompt).toBe("hi");
+		expect(cfg.modes.mid?.onEnterPrompt).toBeUndefined();
+	});
+
+	it("merges classify and model overlays through extends", () => {
+		const cfg = parseConfig({
+			modes: {
+				base: {
+					classify: { byRisk: { LOW: "allow" } },
+					model: { verdicts: ["allow"], fallback: "ask" },
+				},
+				child: { extends: "base", classify: { byClass: { DANGEROUS: "model" } } },
+			},
+		});
+		expect(cfg.modes.child?.classify).toEqual({ byRisk: { LOW: "allow" }, byClass: { DANGEROUS: "model" } });
+		expect(cfg.modes.child?.model).toEqual({ verdicts: ["allow"], fallback: "ask" });
+		});
+
+	it("throws on an extends cycle or unknown parent", () => {
+		expect(() => parseConfig({ modes: { a: { extends: "b" }, b: { extends: "a" } } })).toThrow(/cycle/);
+		expect(() => parseConfig({ modes: { a: { extends: "a" } } })).toThrow(/cycle/);
+		expect(() => parseConfig({ modes: { a: { extends: "ghost" } } })).toThrow(/unknown/);
+	});
+
 	it("keeps valid custom actions", () => {
 		const cfg = parseConfig({
 			modes: {
@@ -118,13 +166,22 @@ describe("parseJsonc", () => {
 		expect(parsed).toEqual({ onEnterPrompt: "see http://x.com /* not a comment */" });
 	});
 
-	it("ships normal / plan / yolo / auto as standalone modes", () => {
+	it("ships normal / plan / yolo / auto, with plan and auto extending normal", () => {
 		const raw = readFileSync(new URL("../config/config.example.jsonc", import.meta.url), "utf-8");
 		const parsed = parseConfig(parseJsonc(raw));
 		expect(parsed.defaultMode).toBe("normal");
 		expect(Object.keys(parsed.modes)).toEqual(["normal", "plan", "yolo", "auto"]);
 		expect(parsed.modes.normal?.permission?.bash).toBe("classify");
 		expect(parsed.modes.plan?.permission?.edit).toEqual({ "*": "deny", "**/*.md": "allow" });
+		// inherited from normal through extends:
+		expect(parsed.modes.plan?.permission?.bash).toBe("classify");
+		expect(parsed.modes.plan?.permission?.read).toEqual({
+			"*": "allow",
+			"*.env": "ask",
+			"*.env.*": "ask",
+			"*.env.example": "allow",
+		});
+		expect(parsed.modes.auto?.permission?.read).toEqual(parsed.modes.plan?.permission?.read);
 		expect(parsed.modes.yolo?.permission).toBeUndefined();
 		expect(parsed.modes.auto?.permission?.bash).toEqual({ "*": "classify", rm: "ask", "rm *": "ask" });
 		expect(parsed.bashClassify.byClass?.READONLY).toBe("allow");

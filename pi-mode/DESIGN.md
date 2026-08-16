@@ -10,13 +10,16 @@ A pi coding-agent extension implementing a **mode-switcher**. A *mode* bundles a
 permission policy, prompts injected on enter/exit/per-turn, and (optionally) an
 AI bash classifier.
 
-- Modes are **config-defined** (arbitrary set, not a hardcoded enum) and
-  **standalone** — no inheritance; each mode's `permission` is exactly what is
-  written. The written template ships **normal / plan / yolo / auto**: normal
-  gates in-workspace tools (except reading `.env`), bash via bash-classify
-  (`READONLY` + `LOCAL_EFFECTS` allow, else ask); plan additionally denies
-  `write`/`edit` except `**/*.md`; yolo omits `permission` entirely (vanilla pi,
-  nothing asks); auto defers risky bash to the small LLM instead of asking.
+- Modes are **config-defined** (arbitrary set, not a hardcoded enum) and standalone
+  by default. `extends: "<mode>"` opts a mode into **explicit** inheritance of a
+  named parent's policy (permission deep-merged, classify/model overlaid, child
+  keys win; prompts never inherited; chains resolve transitively; unknown parent
+  or cycle fails the whole load). The written template ships **normal / plan /
+  yolo / auto**: normal gates in-workspace tools (except reading `.env`), bash via
+  bash-classify (`READONLY` + `LOCAL_EFFECTS` allow, else ask); plan extends
+  normal and denies `write`/`edit` except `**/*.md`; yolo omits `permission`
+  entirely (vanilla pi, nothing asks); auto extends normal and defers risky bash
+  to the small LLM instead of asking.
 - **Everything configurable**: permission rules, prompts, classifier model,
   command wrappers, thresholds.
 - Config file: **`~/.pi/agent/pi-mode-config.jsonc`** (JSONC, inside the agent
@@ -37,7 +40,7 @@ AI bash classifier.
 
 | Ref | Decision |
 |---|---|
-| Q1 | Config-defined arbitrary modes, standalone (no inheritance); template ships normal/plan/yolo/auto. |
+| Q1 | Config-defined arbitrary modes; standalone by default, `extends` for explicit policy inheritance; template ships normal/plan/yolo/auto (plan/auto extend normal). |
 | Q2 | Standalone; flat permission format (`allow`/`deny`/`ask`/`classify`, last-match-wins). |
 | Q3 | `permission` block optional (omit → prompt-only). `classify` is a first-class action. Global `commandWrappers`. |
 | Q4 | Three optional prompt fields emitted as their own block at send time (never the system prompt — that would bust the KV-cache prefix): `onEnterPrompt`/`onExitPrompt` on a mode change (displayed as a compact label), `perTurnPrompt` while staying in a mode (invisible, model-only). State persisted via session entry. |

@@ -1,7 +1,9 @@
 // pi-mode — ~/.pi/agent/pi-mode-config.jsonc
 //
 // Written on first load. Ships normal / plan / yolo / auto.
-// Modes are STANDALONE: what you write is what applies — no inheritance between modes.
+// Modes are standalone by default: what you write is what applies.
+// `extends: "<mode>"` explicitly inherits a parent's permission / classify / model policy
+// (deep-merged, your keys win); prompts are never inherited.
 // Omit `permission` entirely for vanilla pi, no gating at all (that is all `yolo` is).
 // `defaultMode` is the startup mode (--pi-mode flag and persisted session state override it).
 // bash: bash-classify grades, byClass/byRisk pick the verdict; "model" defers to the small LLM.
@@ -55,24 +57,11 @@
     },
     // Planning: normal's gates plus write/edit locked down except markdown notes.
     "plan": {
+      "extends": "normal",
       "onEnterPrompt": null,
       "onExitPrompt": null,
       "perTurnPrompt": null,
       "permission": {
-        "*": "allow",
-        "read": {
-          "*": "allow",
-          "*.env": "ask",
-          "*.env.*": "ask",
-          "*.env.example": "allow"
-        },
-        "externalPath": {
-          "*": "ask",
-          "~/.agents/skills/**": "allow",
-          "/dev/null": "allow",
-          "/tmp/**": "allow"
-        },
-        "bash": "classify",
         "write": { "*": "deny", "**/*.md": "allow" },
         "edit": { "*": "deny", "**/*.md": "allow" }
       }
@@ -81,6 +70,7 @@
     "yolo": {},
     // Hands-off: risky bash goes to the small LLM instead of asking; rm still asks.
     "auto": {
+      "extends": "normal",
       "onEnterPrompt": null,
       "onExitPrompt": null,
       "perTurnPrompt": null,
@@ -92,19 +82,6 @@
         }
       },
       "permission": {
-        "*": "allow",
-        "read": {
-          "*": "allow",
-          "*.env": "ask",
-          "*.env.*": "ask",
-          "*.env.example": "allow"
-        },
-        "externalPath": {
-          "*": "ask",
-          "~/.agents/skills/**": "allow",
-          "/dev/null": "allow",
-          "/tmp/**": "allow"
-        },
         "bash": { "*": "classify", "rm": "ask", "rm *": "ask" }
       }
     }
@@ -123,4 +100,5 @@
 // bash/tool patterns = command-prefix globs ("git push *")
 // write/edit/externalPath = file-path globs ("**/*.md"); externalPath only gates paths outside cwd
 // omit permission    = no gating (vanilla pi / prompt-only)
+// extends "<mode>"    = inherit that mode's permission / classify / model, then override
 // no matching rule   = deny (fail-closed): every gated mode needs a "*" baseline

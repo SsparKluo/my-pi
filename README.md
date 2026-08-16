@@ -171,7 +171,7 @@ Global only — no project-level file. All keys optional; invalid fields fall ba
 
 **What it does.** Mode-switcher: permission policy + enter/exit/per-turn prompts + optional AI bash classifier. State persists per session.
 
-Out of the box the template ships four **standalone** modes (no inheritance — what you write is what applies): **`normal`** (no prompts, in-workspace tools allowed except reading `.env`, bash via bash-classify), **`plan`** (normal + `write`/`edit` denied except `**/*.md`), **`yolo`** (no `permission` block = no gating, nothing asks), and **`auto`** (risky bash defers to the small LLM instead of asking). Omit `permission` for vanilla pi.
+Out of the box the template ships four modes: **`normal`** (no prompts, in-workspace tools allowed except reading `.env`, bash via bash-classify), **`plan`** (`extends: normal` + `write`/`edit` denied except `**/*.md`), **`yolo`** (no `permission` block = no gating, nothing asks), and **`auto`** (`extends: normal`, risky bash defers to the small LLM instead of asking). Omit `permission` for vanilla pi.
 
 **bash grading.** The `classify` action grades bash commands in-process — a TypeScript port of [bash-classify](https://github.com/fprochazka/bash-classify)'s command database (166 commands, MIT) on top of unbash, differentially tested against the Python original (271-command corpus, 100% match). Set `bashClassify.engine: "cli"` to shell out to the `bash-classify` CLI instead (`uv tool install bash-classify`; `bashClassify.command` overrides the invocation). If grading fails, `bashClassify.fallback` applies (default `ask`) — never silently allows.
 
@@ -194,14 +194,14 @@ JSONC (comments + trailing commas). Lives in the agent dir (respects `PI_AGENT_D
     },
     // no permission block = no gating at all
     "yolo": {},
-    // + plan (write/edit denied except **/*.md) and auto (risky bash → small LLM) — see the template
+    // + plan (extends normal + write/edit denied except **/*.md) and auto (extends normal, risky bash → small LLM) — see the template
   },
   "bashClassify": { /* … */ },
   "model": { /* … */ }
 }
 ```
 
-> Modes are standalone — no inheritance. A `permission` block with no matching rule denies (fail-closed), so every gated mode needs a `"*"` baseline.
+> Modes are standalone unless they declare `"extends": "<mode>"` (explicit inheritance: permission deep-merged, classify/model overlaid, prompts never inherited; unknown parent or cycle fails the whole load). A `permission` block with no matching rule denies (fail-closed), so every gated mode needs a `"*"` baseline.
 
 | Field | Meaning |
 |-------|---------|
@@ -212,6 +212,7 @@ JSONC (comments + trailing commas). Lives in the agent dir (respects `PI_AGENT_D
 | `modes.<name>.perTurnPrompt` | Emitted every turn while in the mode (invisible, model-only) |
 | `modes.<name>.permission` | Optional. Omit = prompt-only mode. Surfaces × actions (below) |
 | `modes.<name>.classify` | Per-mode overlay on the bashClassify grade maps |
+| `modes.<name>.extends` | Parent mode whose permission / classify / model policy this mode inherits (deep-merge, child keys win) |
 | `modes.<name>.model` | Per-mode overlay on the model classifier (verdicts / fallback) |
 | `modes.<name>.internal` | `true` = hidden from selector/cycle, rejects `/mode <name>` and `--pi-mode`; programmatic entry only |
 | `bashClassify.command` | CLI invoked per bash unit (stdin → JSON `{classification, risk}`) |

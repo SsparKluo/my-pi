@@ -37,16 +37,16 @@ pi -e ./src/index.ts
 | `Ctrl+Shift+M` | Cycle modes in config order |
 | `--pi-mode <name>` | Start pi already in that mode |
 
-Shipped modes (all standalone — no inheritance between modes; what you write is what applies):
+Shipped modes (standalone unless they say `extends`; chains resolve transitively, cycles fail the load):
 
 | Mode | Behavior |
 |------|----------|
 | **normal** | No prompts. In-workspace tools allowed (except reading `.env`). bash-classify: `READONLY` + `LOCAL_EFFECTS` allow, else ask. |
-| **plan** | normal's gates plus `write`/`edit` denied except `**/*.md`. |
+| **plan** | `extends: normal` + `write`/`edit` denied except `**/*.md`. |
 | **yolo** | `{}` — no `permission` block at all, so no gating: nothing ever asks. |
-| **auto** | normal's gates; risky bash (`EXTERNAL_EFFECTS`/`DANGEROUS`/`UNKNOWN`) defers to the small LLM instead of asking; `rm` still asks. |
+| **auto** | `extends: normal`; risky bash (`EXTERNAL_EFFECTS`/`DANGEROUS`/`UNKNOWN`) defers to the small LLM instead of asking; `rm` still asks. |
 
-Omit `permission` for vanilla pi. Modes are config-defined — add your own freely. `internal: true` modes are user-unreachable (`/mode`, selector, cycle, `--pi-mode` all reject/hide them) and exist for programmatic features (e.g. a future `/goal`).
+Omit `permission` for vanilla pi. Modes are config-defined — add your own freely. `extends` gives explicit inheritance: the child deep-merges the parent's `permission` and overlays `classify`/`model` (child keys win); an unknown parent or a cycle makes the whole config fall back to defaults (fail-closed). `internal: true` modes are user-unreachable (`/mode`, selector, cycle, `--pi-mode` all reject/hide them) and exist for programmatic features (e.g. a future `/goal`).
 
 **bash grading.** The `classify` action grades in-process (TS port of
 [bash-classify](https://github.com/fprochazka/bash-classify)'s database on top of
@@ -84,6 +84,8 @@ to the in-memory default (`normal` mode, no permission).
   "commandWrappers": ["rtk","time","nice","command"],   // transparent prefixes stripped before eval
   "modes": {
     "<modeName>": {
+      "extends": "<parentName>",        // OPTIONAL — inherit the parent's permission / classify / model
+                                      // policy (deep-merged, your keys win); prompts are never inherited
       "onEnterPrompt": "…" | null,   // emitted (label) on the first user message in the mode
       "onExitPrompt":  "…" | null,   // emitted (label) on the next user message after leaving
       "perTurnPrompt": "…" | null,   // emitted (invisible, model-only) before each user message while active
