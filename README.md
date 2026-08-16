@@ -65,7 +65,7 @@ Every config file is optional. Missing files → built-in defaults (pi-mode writ
 
 | Zone | Contents |
 |------|----------|
-| Footer line 1 | Model + thinking, cwd, git, active pi-mode (if not `normal`) |
+| Footer line 1 | Model + thinking, cwd, git, active pi-mode (always shown) |
 | Footer line 2 | Magic Context status + cumulative tokens + cache hit rate |
 | "Worked for" | Duration, TPS, TTFT, last-request cache rate, per-turn tokens |
 
@@ -118,7 +118,7 @@ Syntax: `provider/modelId[:thinkingLevel]`. Valid levels: `off`, `minimal`, `low
 
 Footer line 1/2 also surface other extensions' `ctx.ui.setStatus` values:
 
-- `pi-mode` — e.g. `⏸ plan`, `⚡ auto`
+- `pi-mode` — e.g. `plan`, `auto`, `yolo`
 - `magic-context` — usage / state string
 
 ---
@@ -171,7 +171,7 @@ Global only — no project-level file. All keys optional; invalid fields fall ba
 
 **What it does.** Mode-switcher: permission policy + enter/exit/per-turn prompts + optional AI bash classifier. State persists per session.
 
-Out of the box there is a single **`default`** mode: no prompts, in-workspace tools allowed (except reading `.env`), bash via bash-classify (`READONLY` + `LOCAL_EFFECTS` allow, else ask). Omit `permission` for vanilla pi.
+Out of the box the template ships four **standalone** modes (no inheritance — what you write is what applies): **`normal`** (no prompts, in-workspace tools allowed except reading `.env`, bash via bash-classify), **`plan`** (normal + `write`/`edit` denied except `**/*.md`), **`yolo`** (no `permission` block = no gating, nothing asks), and **`auto`** (risky bash defers to the small LLM instead of asking). Omit `permission` for vanilla pi.
 
 **bash grading.** The `classify` action grades bash commands in-process — a TypeScript port of [bash-classify](https://github.com/fprochazka/bash-classify)'s command database (166 commands, MIT) on top of unbash, differentially tested against the Python original (271-command corpus, 100% match). Set `bashClassify.engine: "cli"` to shell out to the `bash-classify` CLI instead (`uv tool install bash-classify`; `bashClassify.command` overrides the invocation). If grading fails, `bashClassify.fallback` applies (default `ask`) — never silently allows.
 
@@ -181,45 +181,31 @@ JSONC (comments + trailing commas). Lives in the agent dir (respects `PI_AGENT_D
 
 ```jsonc
 {
-  "defaultMode": "default",
-  "bashClassify": {
-    "command": "bash-classify",
-    "byRisk": { "LOW": "allow", "MEDIUM": "ask", "HIGH": "ask" },
-    "byClass": {
-      "READONLY": "allow",
-      "LOCAL_EFFECTS": "allow",
-      "EXTERNAL_EFFECTS": "ask",
-      "DANGEROUS": "ask",
-      "UNKNOWN": "ask"
-    },
-    "fallback": "ask"
-  },
-  "model": {
-    "model": "anthropic/claude-haiku-4-5",
-    "fallbackModels": [],
-    "verdicts": ["allow", "deny"],
-    "fallback": "deny",
-    "cache": true
-  },
+  "defaultMode": "normal",
   "modes": {
-    "default": {
-      "onEnterPrompt": null,
-      "onExitPrompt": null,
-      "perTurnPrompt": null,
+    // gated baseline
+    "normal": {
       "permission": {
         "*": "allow",
-        "read": { "*": "allow", "*.env": "ask", "*.env.*": "ask", "*.env.example": "allow" },
+        "read": { "*": "allow", "*.env": "ask", "*.env.example": "allow" },
         "externalPath": "ask",
         "bash": "classify"
       }
-    }
-  }
+    },
+    // no permission block = no gating at all
+    "yolo": {},
+    // + plan (write/edit denied except **/*.md) and auto (risky bash → small LLM) — see the template
+  },
+  "bashClassify": { /* … */ },
+  "model": { /* … */ }
 }
 ```
 
+> Modes are standalone — no inheritance. A `permission` block with no matching rule denies (fail-closed), so every gated mode needs a `"*"` baseline.
+
 | Field | Meaning |
 |-------|---------|
-| `defaultMode` | Startup mode when no flag / no persisted session state |
+| `defaultMode` | Startup mode when no flag / no persisted session state (invalid → `normal`, then first mode) |
 | `commandWrappers` | Transparent prefixes stripped before bash eval (`time ls` → `ls`) |
 | `modes.<name>.onEnterPrompt` | Emitted (compact label) on first message after entering |
 | `modes.<name>.onExitPrompt` | Emitted (compact label) on first message after leaving |
@@ -243,7 +229,7 @@ JSONC (comments + trailing commas). Lives in the agent dir (respects `PI_AGENT_D
 
 **Actions:** `allow` | `deny` | `ask` | `classify` (bash → bash-classify grading; classes mapped to `model` go to the small LLM).
 
-**Value forms:** a string applies to the whole surface (`"read": "allow"`); an object is a pattern→action map, **last-match-wins**. Bash/tool patterns are command-prefix globs (`"git push *"`); write/edit/path patterns are file-path globs (`"**/*.md"`). Modes are config-defined — add your own freely.
+**Value forms:** a string applies to the whole surface (`"read": "allow"`); an object is a pattern→action map, **last-match-wins**. Bash/tool patterns are command-prefix globs (`"git push *"`); write/edit/path patterns are file-path globs (`"**/*.md"`). Modes are config-defined and standalone — add your own freely.
 
 > Prompts are **never** injected into the system prompt (that would bust the KV-cache). They ride as a separate conversation message before the user turn.
 
