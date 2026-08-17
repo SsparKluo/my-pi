@@ -18,7 +18,7 @@ AI bash classifier.
   yolo / auto**: normal gates in-workspace tools (except reading `.env`), bash via
   bash-classify (`READONLY` + `LOCAL_EFFECTS` allow, else ask); plan extends
   normal, denies `write`/`edit` except `**/*.md`, and overlays bash classify so
-  only `READONLY` is allowed; yolo omits `permission`
+  only `READONLY` auto-allows (everything else asks); yolo omits `permission`
   entirely (vanilla pi, nothing asks); auto extends normal and defers risky bash
   to the small LLM instead of asking.
 - **Everything configurable**: permission rules, prompts, classifier model,

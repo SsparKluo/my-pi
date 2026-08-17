@@ -55,8 +55,8 @@
         "bash": "classify"
       }
     },
-    // Planning: read-only. write/edit denied except markdown notes; bash only
-    // READONLY is allowed (inherited classify overlay denies everything else).
+    // Planning: write/edit denied except markdown notes; bash READONLY allows,
+    // everything else asks (overrides normal's LOCAL_EFFECTS allow).
     // internal: hidden from selector/cycle, /mode and --pi-mode reject it —
     // reserved for a future /plan command.
     "plan": {
@@ -67,10 +67,10 @@
       "perTurnPrompt": null,
       "classify": {
         "byClass": {
-          "LOCAL_EFFECTS": "deny",
-          "EXTERNAL_EFFECTS": "deny",
-          "DANGEROUS": "deny",
-          "UNKNOWN": "deny"
+          "LOCAL_EFFECTS": "ask",
+          "EXTERNAL_EFFECTS": "ask",
+          "DANGEROUS": "ask",
+          "UNKNOWN": "ask"
         }
       },
       "permission": {
