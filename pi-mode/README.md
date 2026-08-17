@@ -42,7 +42,7 @@ Shipped modes (standalone unless they say `extends`; chains resolve transitively
 | Mode | Behavior |
 |------|----------|
 | **normal** | No prompts. In-workspace tools allowed (except reading `.env`). bash-classify: `READONLY` + `LOCAL_EFFECTS` allow, else ask. |
-| **plan** | `extends: normal` + `write`/`edit` denied except `**/*.md`. |
+| **plan** | `extends: normal` + `write`/`edit` denied except `**/*.md`. `internal: true` — reserved for a future `/plan` command. |
 | **yolo** | `{}` — no `permission` block at all, so no gating: nothing ever asks. |
 | **auto** | `extends: normal`; risky bash (`EXTERNAL_EFFECTS`/`DANGEROUS`/`UNKNOWN`) defers to the small LLM instead of asking; `rm` still asks. |
 

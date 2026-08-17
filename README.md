@@ -194,7 +194,8 @@ JSONC (comments + trailing commas). Lives in the agent dir (respects `PI_AGENT_D
     },
     // no permission block = no gating at all
     "yolo": {},
-    // + plan (extends normal + write/edit denied except **/*.md) and auto (extends normal, risky bash → small LLM) — see the template
+    // + plan (extends normal + write/edit denied except **/*.md; internal — reserved for a
+    // future /plan command) and auto (extends normal, risky bash → small LLM) — see the template
   },
   "bashClassify": { /* … */ },
   "model": { /* … */ }

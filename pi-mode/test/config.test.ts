@@ -172,6 +172,7 @@ describe("parseJsonc", () => {
 		expect(parsed.defaultMode).toBe("normal");
 		expect(Object.keys(parsed.modes)).toEqual(["normal", "plan", "yolo", "auto"]);
 		expect(parsed.modes.normal?.permission?.bash).toBe("classify");
+		expect(parsed.modes.plan?.internal).toBe(true);
 		expect(parsed.modes.plan?.permission?.edit).toEqual({ "*": "deny", "**/*.md": "allow" });
 		// inherited from normal through extends:
 		expect(parsed.modes.plan?.permission?.bash).toBe("classify");

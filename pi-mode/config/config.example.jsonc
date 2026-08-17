@@ -56,8 +56,11 @@
       }
     },
     // Planning: normal's gates plus write/edit locked down except markdown notes.
+    // internal: hidden from selector/cycle, /mode and --pi-mode reject it —
+    // reserved for a future /plan command.
     "plan": {
       "extends": "normal",
+      "internal": true,
       "onEnterPrompt": null,
       "onExitPrompt": null,
       "perTurnPrompt": null,
