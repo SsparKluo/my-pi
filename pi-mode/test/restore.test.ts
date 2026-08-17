@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findPersistedMode } from "../src/restore.ts";
+import { findPersistedMode, resolveBranchMode } from "../src/restore.ts";
 
 const state = (mode: unknown, id: string) => ({
 	type: "custom",
@@ -60,5 +60,28 @@ describe("findPersistedMode", () => {
 			message("m1"),
 		];
 		expect(findPersistedMode(branch)).toBeUndefined();
+	});
+});
+
+describe("resolveBranchMode", () => {
+	const modes = { normal: {}, plan: {}, yolo: {} };
+
+	it("returns the persisted mode when it still exists in the config", () => {
+		const branch = [state("plan", "s1"), message("m1")];
+		expect(resolveBranchMode(branch, modes, "normal")).toBe("plan");
+	});
+
+	it("falls back to defaultMode when the branch has no state", () => {
+		expect(resolveBranchMode([message("m1")], modes, "normal")).toBe("normal");
+	});
+
+	it("falls back to defaultMode when the persisted name is gone from the config", () => {
+		const branch = [state("gone", "s1")];
+		expect(resolveBranchMode(branch, modes, "normal")).toBe("normal");
+	});
+
+	it("restores an internal mode (it is still in the config)", () => {
+		const branch = [state("plan", "s1")];
+		expect(resolveBranchMode(branch, { ...modes, plan: { internal: true } }, "normal")).toBe("plan");
 	});
 });

@@ -29,7 +29,7 @@ import {
 	SessionApprovals,
 	subjectKind,
 } from "./permission.ts";
-import { findPersistedMode, STATE_ENTRY } from "./restore.ts";
+import { findPersistedMode, resolveBranchMode, STATE_ENTRY } from "./restore.ts";
 import { modeStatus } from "./status.ts";
 
 const EVENT_CHANGED = "pi-mode:changed";
@@ -315,6 +315,18 @@ export default function piMode(pi: ExtensionAPI): void {
 			block: true,
 			reason: `pi-mode (${currentMode}): ${surface} denied by user`,
 		};
+	});
+
+	// Tree navigation rewrites the active branch; re-derive the mode from it so
+	// the abandoned branch's mode doesn't leak (status, tools, and the next
+	// message's transition prompt). Same derivation as resume; no transition is
+	// announced — lastSentMode is seeded, so the next message gets perTurn.
+	pi.on("session_tree", async (_event, ctx) => {
+		const next = resolveBranchMode(ctx.sessionManager.getBranch(), config.modes, config.defaultMode);
+		if (next !== currentMode) {
+			setMode(ctx, next, { reason: "resume", persist: false });
+		}
+		lastSentMode = next;
 	});
 
 	// Restore (resume) or initialize (startup) the active mode.

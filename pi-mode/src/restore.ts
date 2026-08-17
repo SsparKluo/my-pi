@@ -19,3 +19,18 @@ export function findPersistedMode(branch: StateEntryLike[]): string | undefined 
 	}
 	return undefined;
 }
+
+/**
+ * The mode the active branch is in: its persisted state when the name still
+ * exists in the config (internal modes included), else defaultMode. Shared by
+ * session_start (resume) and session_tree (navigation) so both re-derive from
+ * the branch the same way.
+ */
+export function resolveBranchMode(
+	branch: StateEntryLike[],
+	modes: Record<string, unknown>,
+	defaultMode: string,
+): string {
+	const persisted = findPersistedMode(branch);
+	return persisted && modes[persisted] !== undefined ? persisted : defaultMode;
+}

@@ -63,7 +63,7 @@ Inside [herdr](https://herdr.sh), the active mode is reported as the agents-pane
 line 2 label (`pi · plan`). A permission ask emits `herdr:blocked` so the pane
 shows herdr's **blocked** state until the dialog closes.
 
-Mode state is persisted as a session entry (`pi-mode-state`) and restored on resume/reload.
+Mode state is persisted as a session entry (`pi-mode-state`) and restored on resume, and re-derived on tree navigation (`session_tree`) so an abandoned branch's mode cannot leak into the surviving one.
 
 ## Config
 
@@ -148,8 +148,9 @@ message in both the transcript and the model context.
 | Mode change / first message | `onExitPrompt`(prev) then `onEnterPrompt`(curr); shown as a compact label (`plan → auto`) |
 
 `onEnterPrompt` and `perTurnPrompt` are mutually exclusive for a given send.
-On session resume, `lastSentMode` is seeded to the restored mode so the first
-message gets `perTurnPrompt` rather than re-announcing `onEnterPrompt`.
+On session resume and after a tree navigation, `lastSentMode` is seeded to the
+restored mode so the first message gets `perTurnPrompt` rather than re-announcing
+`onEnterPrompt` (or a stale `plan → …` transition from the abandoned branch).
 
 ### Permission gating
 
