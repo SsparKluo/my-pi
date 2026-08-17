@@ -55,7 +55,8 @@
         "bash": "classify"
       }
     },
-    // Planning: normal's gates plus write/edit locked down except markdown notes.
+    // Planning: read-only. write/edit denied except markdown notes; bash only
+    // READONLY is allowed (inherited classify overlay denies everything else).
     // internal: hidden from selector/cycle, /mode and --pi-mode reject it —
     // reserved for a future /plan command.
     "plan": {
@@ -64,6 +65,14 @@
       "onEnterPrompt": null,
       "onExitPrompt": null,
       "perTurnPrompt": null,
+      "classify": {
+        "byClass": {
+          "LOCAL_EFFECTS": "deny",
+          "EXTERNAL_EFFECTS": "deny",
+          "DANGEROUS": "deny",
+          "UNKNOWN": "deny"
+        }
+      },
       "permission": {
         "write": { "*": "deny", "**/*.md": "allow" },
         "edit": { "*": "deny", "**/*.md": "allow" }
