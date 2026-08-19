@@ -14,12 +14,19 @@ const cfg = DEFAULT_CONFIG.model;
 
 describe("parseClassifierVerdict", () => {
 	const v = ["allow", "deny"];
-	it("reads a lone verdict, deny on mixed, fallback on empty", () => {
+	it("reads a lone verdict, most restrictive on mixed, fallback on empty", () => {
 		expect(parseClassifierVerdict("allow", v, "deny")).toBe("allow");
 		expect(parseClassifierVerdict("I would deny this.", v, "allow")).toBe("deny");
 		expect(parseClassifierVerdict("allow\ndeny", v, "allow")).toBe("deny");
 		expect(parseClassifierVerdict("nope", v, "deny")).toBe("deny");
 		expect(parseClassifierVerdict("maybe", v, "allow")).toBe("allow");
+	});
+
+	it("picks the most restrictive among the allowed verdicts", () => {
+		const ask = ["allow", "ask"];
+		expect(parseClassifierVerdict("ask", ask, "deny")).toBe("ask");
+		expect(parseClassifierVerdict("allow then ask", ask, "deny")).toBe("ask");
+		expect(parseClassifierVerdict("deny", ask, "ask")).toBe("ask");
 	});
 
 	it("only accepts ask when it is in the verdict list", () => {

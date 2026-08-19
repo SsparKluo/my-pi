@@ -10,7 +10,9 @@ export function normalizeCacheKey(command: string): string {
 	return command.trim().replace(/\s+/g, " ");
 }
 
-/** Parse model text into a configured verdict. Both allow+deny → deny. None → fallback. */
+const VERDICT_RANK: Record<string, number> = { deny: 3, ask: 2, classify: 2, allow: 1 };
+
+/** Parse model text into a configured verdict. Multiple hits → most restrictive. None → fallback. */
 export function parseClassifierVerdict(text: string, verdicts: string[], fallback: Action): Action {
 	const allowed = new Set(verdicts.map((v) => v.toLowerCase()));
 	const found: string[] = [];
@@ -18,13 +20,8 @@ export function parseClassifierVerdict(text: string, verdicts: string[], fallbac
 		const word = match[0];
 		if (allowed.has(word) && !found.includes(word)) found.push(word);
 	}
-	if (found.includes("deny")) return "deny";
-	if (found.length === 1) {
-		const only = found[0];
-		if (only === "allow" || only === "deny" || only === "ask" || only === "classify") return only;
-	}
-	if (found.length > 1) return fallback === "allow" ? "allow" : "deny";
-	return fallback;
+	if (found.length === 0) return fallback;
+	return found.reduce((a, b) => ((VERDICT_RANK[b] ?? 0) > (VERDICT_RANK[a] ?? 0) ? b : a)) as Action;
 }
 
 export function mergeClassifierVerdicts(verdicts: Action[], fallback: Action): Action {
