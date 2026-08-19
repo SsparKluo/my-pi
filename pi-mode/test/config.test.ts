@@ -191,6 +191,8 @@ describe("parseJsonc", () => {
 		expect(parsed.modes.auto?.permission?.read).toEqual(parsed.modes.plan?.permission?.read);
 		expect(parsed.modes.yolo?.permission).toBeUndefined();
 		expect(parsed.modes.auto?.permission?.bash).toEqual({ "*": "classify", rm: "ask", "rm *": "ask" });
+		expect(parsed.modes.auto?.classify?.byRisk).toEqual({ LOW: "allow", MEDIUM: "model", HIGH: "model" });
+		expect(parsed.modes.auto?.model).toEqual({ verdicts: ["allow", "ask"], fallback: "ask" });
 		expect(parsed.bashClassify.byClass?.READONLY).toBe("allow");
 		expect(parsed.bashClassify.byClass?.EXTERNAL_EFFECTS).toBe("ask");
 	});

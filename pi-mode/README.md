@@ -44,7 +44,7 @@ Shipped modes (standalone unless they say `extends`; chains resolve transitively
 | **normal** | No prompts. In-workspace tools allowed (except reading `.env`). bash-classify: `READONLY` + `LOCAL_EFFECTS` allow, else ask. |
 | **plan** | `extends: normal` + `write`/`edit` denied except `**/*.md`; bash classify overlay asks on everything except `READONLY`. `internal: true` — reserved for a future `/plan` command. |
 | **yolo** | `{}` — no `permission` block at all, so no gating: nothing ever asks. |
-| **auto** | `extends: normal`; risky bash (`EXTERNAL_EFFECTS`/`DANGEROUS`/`UNKNOWN`) defers to the small LLM instead of asking; `rm` still asks. |
+| **auto** | `extends: normal`; risky bash (`EXTERNAL_EFFECTS`/`DANGEROUS`/`UNKNOWN`/`MEDIUM`/`HIGH`) and hidden or unparseable units defer to the small LLM instead of asking; `rm` still asks (`sudo rm …` matches `rm *` too — a leading `sudo`/`doas` is stripped). The classifier may only answer `allow`/`ask` and falls back to `ask` when the model chain fails — auto never hard-denies. |
 
 Omit `permission` for vanilla pi. Modes are config-defined — add your own freely. `extends` gives explicit inheritance: the child deep-merges the parent's `permission` and overlays `classify`/`model` (child keys win); an unknown parent or a cycle makes the whole config fall back to defaults (fail-closed). `internal: true` modes are user-unreachable (`/mode`, selector, cycle, `--pi-mode` all reject/hide them) and exist for programmatic features (e.g. a future `/goal`).
 

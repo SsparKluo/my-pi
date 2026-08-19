@@ -46,12 +46,12 @@ AI bash classifier.
 | Q3 | `permission` block optional (omit → prompt-only). `classify` is a first-class action. Global `commandWrappers`. |
 | Q4 | Three optional prompt fields emitted as their own block at send time (never the system prompt — that would bust the KV-cache prefix): `onEnterPrompt`/`onExitPrompt` on a mode change (displayed as a compact label), `perTurnPrompt` while staying in a mode (invisible, model-only). State persisted via session entry. |
 | Q5 | Broadcast `pi-mode:changed` event + footer status line + session-entry-readable. UX: `--pi-mode` flag, `/mode` command + selector, cycle shortcut. No service accessor yet. |
-| Q6 | `classify` grades via bash-classify (`byClass`/`byRisk` → allow/ask/deny/`model`); `model` defers the unit to the small LLM (`model.verdicts` may exclude `ask`). Explicit bash patterns still win (last-match-wins). |
+| Q6 | `classify` grades via bash-classify (`byClass`/`byRisk` → allow/ask/deny/`model`); `model` defers the unit to the small LLM (`model.verdicts` picks the answers — auto ships allow/ask so it never denies; multiple hits parse to the most restrictive). Explicit bash patterns still win (last-match-wins). |
 | Q7 | Ask dialog = custom TUI (`ctx.ui.custom`); codeblock, foldable, max-height internal scroll; session approvals record the matched pattern; fail-closed non-interactive deny. |
 | §38 | `unbash` parses bash to AST before classification. |
-| §47 | Transparent wrappers (`rtk`, …) stripped; hiding wrappers (`eval`, `sudo`, …) → fail-closed ask. |
+| §47 | Transparent wrappers (`rtk`, …) and privilege elevators (`sudo`/`doas`, unless a flag follows) stripped before pattern matching; indirection (`eval`, `bash -c`, `$(…)`, compounds) is graded, not forced to ask — the grader recurses into inner commands. |
 | §60 | Classifier context = whole original command + pi-loaded agents files + previous user / last assistant / current user. |
-| §61/63 | Cascade: unbash units for deterministic verdicts; classify ≤threshold uncertain units (whole command as context); else (>threshold or unbash fails) classify whole command. |
+| §61/63 | Cascade: unbash units for deterministic verdicts; classify ≤threshold uncertain units (whole command as context); else (>threshold or unbash fails) classify whole command when the mode classifies — otherwise fail-closed ask (deny still wins). |
 
 ## 3. Configuration schema
 

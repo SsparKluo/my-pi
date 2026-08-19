@@ -31,6 +31,7 @@
     "verdicts": ["allow", "deny"],
     "fallback": "deny",
     "cache": true
+    // modes can override verdicts/fallback (see auto: never-deny classifier)
   },
   "modes": {
     // Gated baseline: in-workspace tools allowed (except reading .env), bash graded.
@@ -80,7 +81,10 @@
     },
     // No permission block = no gating, nothing ever asks. True yolo.
     "yolo": {},
-    // Hands-off: risky bash goes to the small LLM instead of asking; rm still asks.
+    // Hands-off: risky bash goes to the small LLM instead of asking; rm still asks
+    // (a leading sudo/doas is stripped first, so `sudo rm …` also matches "rm *").
+    // The classifier may only answer allow/ask — never deny — and falls back to
+    // asking when the model chain fails, so auto never hard-denies.
     "auto": {
       "extends": "normal",
       "onEnterPrompt": null,
@@ -91,8 +95,10 @@
           "EXTERNAL_EFFECTS": "model",
           "DANGEROUS": "model",
           "UNKNOWN": "model"
-        }
+        },
+        "byRisk": { "LOW": "allow", "MEDIUM": "model", "HIGH": "model" }
       },
+      "model": { "verdicts": ["allow", "ask"], "fallback": "ask" },
       "permission": {
         "bash": { "*": "classify", "rm": "ask", "rm *": "ask" }
       }
@@ -105,9 +111,13 @@
 // surfaces:  bash | read | write | edit | grep | find | ls | externalPath | *
 // actions:   allow | deny | ask | classify
 // classify:  grade via bash-classify, then byClass/byRisk pick the verdict.
+//            sudo/doas-prefixed units are pattern-matched on their inner command
+//            (`sudo rm …` matches "rm *"); eval/bash -c/$(…)/compound and
+//            unparseable commands grade like any other unit (UNKNOWN when the
+//            grader cannot see inside), so they reach the model in auto.
 // grade verdicts (byClass/byRisk values): allow | deny | ask | model
 //            "model" = defer that unit to the small LLM (model.verdicts picks its answers;
-//            omit "ask" from verdicts for a hands-off mode).
+//            omit "deny" for a never-deny classifier, e.g. auto's allow/ask).
 // value:     "<action>"  or  { "<pattern>": "<action>", ... }   (last-match-wins)
 // bash/tool patterns = command-prefix globs ("git push *")
 // write/edit/externalPath = file-path globs ("**/*.md"); externalPath only gates paths outside cwd
