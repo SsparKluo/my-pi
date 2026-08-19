@@ -334,7 +334,7 @@ When `basePrompt` is absent, the extension only replaces Pi's "Available tools:"
 
 ## 429-retry — auto-retry rate limits
 
-**What it does.** Retries transient HTTP 429s (any provider): up to 10 attempts, live status-bar countdown. Uses the response `retry-after` when present; otherwise an increasing wait sequence (`5, 10, 20, 30, 60, 90, …` — +30s after 30). Hard usage limits fail fast with the reset time.
+**What it does.** Retries transient HTTP 429s (any provider): up to 10 attempts, live countdown in a yellow warning line above the input box. Uses the response `retry-after` when present; otherwise an increasing wait sequence (`5, 10, 20, 30, 60, 90, …` — +30s after 30). Hard usage limits fail fast with the reset time.
 
 ### Config: none (runtime only)
 

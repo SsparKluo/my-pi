@@ -39,6 +39,19 @@ export default function (pi: ExtensionAPI) {
   let customWaitMs: number | null = null;
   let _ctx: ExtensionContext | null = null;
 
+  /**
+   * 在输入框上方显示一条黄色（warning）状态行；传 undefined 清除。
+   */
+  function showWidget(text: string | undefined) {
+    if (text === undefined) {
+      _ctx?.ui?.setWidget?.("429-retry", undefined, { placement: "aboveEditor" });
+      return;
+    }
+    const theme = _ctx?.ui?.theme;
+    if (!theme) return;
+    _ctx?.ui?.setWidget?.("429-retry", [theme.fg("warning", text)], { placement: "aboveEditor" });
+  }
+
   // 保存当前的 fetch（可能是 request-logger 的包装版本）
   const currentFetch = globalThis.fetch;
 
@@ -86,11 +99,6 @@ export default function (pi: ExtensionAPI) {
     }
     const base = RETRY_WAIT_SEQUENCE_SECONDS[RETRY_WAIT_SEQUENCE_SECONDS.length - 1];
     return (base + (attempt - RETRY_WAIT_SEQUENCE_SECONDS.length) * 30) * 1000;
-  }
-
-  /** 当前等待策略的人类可读描述（用于状态栏） */
-  function describeWaitStrategy(): string {
-    return customWaitMs !== null ? `${customWaitMs / 1000}s` : "5,10,20,30,60,90...+30s/次";
   }
 
   /**
@@ -208,13 +216,7 @@ export default function (pi: ExtensionAPI) {
       // 硬用量限制（判定见 isHardUsageLimit）：立即失败，把原始响应交还上层
       // SDK，让它抛出错误并停止 agent（同时展示重置时间），而不是空转重试。
       if (await isHardUsageLimit(response, rawWaitMs)) {
-        const theme = _ctx?.ui?.theme;
-        if (theme) {
-          _ctx?.ui?.setStatus?.(
-            "429-retry",
-            theme.fg("dim", "Usage limit reached — surfacing error (no retry)")
-          );
-        }
+        showWidget("Usage limit reached — surfacing error (no retry)");
         isRateLimited = false;
         return response;
       }
@@ -228,18 +230,12 @@ export default function (pi: ExtensionAPI) {
       let actualWaitMs = Math.max(rawWaitMs, 1000);
       actualWaitMs = Math.min(actualWaitMs, HARD_LIMIT_WAIT_MS);
 
-      // 倒计时显示（原地更新同一行，不累积）
-      const theme = _ctx?.ui?.theme;
+      // 倒计时显示（输入框上方黄色警告行，原地更新，不累积）
       const endTime = Date.now() + actualWaitMs;
       while (Date.now() < endTime) {
         const remainingSec = Math.ceil((endTime - Date.now()) / 1000);
         if (remainingSec <= 0) break;
-        if (theme) {
-          _ctx?.ui?.setStatus?.(
-            "429-retry",
-            theme.fg("dim", `Rate limited (429). Waiting ${remainingSec}s before retry ${attempts}/${MAX_RETRIES}...`)
-          );
-        }
+        showWidget(`Rate limited (429). Waiting ${remainingSec}s before retry ${attempts}/${MAX_RETRIES}...`);
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
 
@@ -251,18 +247,12 @@ export default function (pi: ExtensionAPI) {
     if (isRateLimited && response.status !== 429 && !isRewrittenRateLimit(response)) {
       isRateLimited = false;
       retryCount = 0;
-      _ctx?.ui?.setStatus?.("429-retry", undefined);
+      showWidget(undefined);
     }
 
     // 如果达到最大重试次数仍然 429
     if ((response.status === 429 || isRewrittenRateLimit(response)) && attempts >= MAX_RETRIES) {
-      const theme = _ctx?.ui?.theme;
-      if (theme) {
-        _ctx?.ui?.setStatus?.(
-          "429-retry",
-          theme.fg("dim", `Rate limit persists after ${MAX_RETRIES} retries`)
-        );
-      }
+      showWidget(`Rate limit persists after ${MAX_RETRIES} retries`);
     }
 
     return response;
@@ -304,7 +294,7 @@ export default function (pi: ExtensionAPI) {
 
     isRateLimited = false;
     retryCount = 0;
-    _ctx?.ui?.setStatus?.("429-retry", undefined);
+    showWidget(undefined);
   }
 
   // 初始化时启用包装
@@ -314,7 +304,6 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("429-retry", {
     description: "Toggle 429 retry or set wait time (e.g. /429-retry 30)",
     handler: async (args, ctx) => {
-      const theme = ctx.ui.theme;
       const arg = args?.trim().toLowerCase();
 
       // 解析参数：数字表示设置等待时间
@@ -323,10 +312,6 @@ export default function (pi: ExtensionAPI) {
         if (seconds > 0) {
           customWaitMs = seconds * 1000;
           ctx.ui.notify(`429 retry wait time set to ${seconds}s`, "info");
-          ctx.ui.setStatus(
-            "429-retry",
-            theme.fg("dim", `429 retry: ${enabled ? "ON" : "OFF"} (${seconds}s)`)
-          );
         } else {
           ctx.ui.notify("Wait time must be > 0", "error");
         }
@@ -356,30 +341,17 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify("Usage: /429-retry [on|off|<seconds>]", "warning");
         return;
       }
-
-      // 更新状态栏
-      ctx.ui.setStatus(
-        "429-retry",
-        enabled
-          ? theme.fg("dim", `429 retry: ON (${describeWaitStrategy()})`)
-          : theme.fg("dim", "429 retry: OFF")
-      );
     },
   });
 
   // session_start 时初始化上下文
   pi.on("session_start", async (_event, ctx) => {
     _ctx = ctx;
-    const theme = ctx.ui.theme;
-    ctx.ui.setStatus(
-      "429-retry",
-      theme.fg("dim", `429 retry: ${enabled ? "ON" : "OFF"} (${describeWaitStrategy()})`)
-    );
 
     // 3秒后隐藏初始状态（如果没有被限流）
     setTimeout(() => {
       if (!isRateLimited) {
-        ctx.ui.setStatus("429-retry", undefined);
+        showWidget(undefined);
       }
     }, 3000);
   });
