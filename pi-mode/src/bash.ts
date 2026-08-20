@@ -20,7 +20,7 @@ export function evaluateBashCommand(
 			// which the classify maps decide (model in auto, ask in normal).
 			return { ...fallback, subject: command, classifyTargets: [command] };
 		}
-		if (fallback.action === "deny") return fallback;
+		if (fallback.action === "deny" || fallback.action === "model") return fallback;
 		return { ...fallback, action: "ask", askUnits: [command] };
 	}
 
@@ -43,7 +43,8 @@ export function evaluateBashCommand(
 	}
 
 	const classify = verdicts.filter((v) => v.action === "classify");
-	if (classify.length > wholeCommandThreshold) {
+	const modelUnits = verdicts.filter((v) => v.action === "model");
+	if (classify.length + modelUnits.length > wholeCommandThreshold) {
 		const fallback = wholeCommand(command, rules, cwd);
 		return fallback.action === "classify"
 			? { ...fallback, subject: command, classifyTargets: [command] }
@@ -54,6 +55,14 @@ export function evaluateBashCommand(
 			...classify[0],
 			subject: command,
 			classifyTargets: classify.map((v) => v.subject),
+			...(modelUnits.length > 0 ? { modelTargets: modelUnits.map((v) => v.subject) } : {}),
+		};
+	}
+	if (modelUnits.length > 0) {
+		return {
+			...modelUnits[0],
+			subject: command,
+			modelTargets: modelUnits.map((v) => v.subject),
 		};
 	}
 	return { action: "allow", surface: "bash", pattern: verdicts[0]?.pattern ?? null, subject: command, kind: "command" };

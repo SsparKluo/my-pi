@@ -255,21 +255,35 @@ export default function piMode(pi: ExtensionAPI): void {
 						ctx.cwd,
 				  );
 		let action = verdict.action;
-		if (action === "classify") {
-			const targets = verdict.classifyTargets ?? [verdict.subject];
-			const maps = mergeClassifyMaps(
-				config.bashClassify,
-				currentMode ? config.modes[currentMode]?.classify : undefined,
-			);
-			const gradeFallback: GradeAction =
-				config.bashClassify.fallback === "allow" || config.bashClassify.fallback === "deny"
-					? config.bashClassify.fallback
-					: "ask";
-			const graded = await gradeBashUnits(targets, maps, gradeFallback, bashClassify);
-			const needsLlm = graded.filter((g) => g.action === "model").map((g) => g.unit);
-			const rest = graded.filter((g) => g.action !== "model").map((g) => g.action as Action);
-			if (needsLlm.length > 0) {
-				rest.push(await classifyVerdict(ctx, verdict.subject, needsLlm));
+		if (action === "classify" || action === "model") {
+			// Non-bash surfaces have no grader: their `model` targets are synthesized
+			// as "<surface> <subject>" (e.g. "read /home/x/.env") for the LLM.
+			const modelWhole =
+				verdict.kind === "command" ? verdict.subject : `${surface} ${subject}`;
+			const rest: Action[] = [];
+			if (action === "classify") {
+				const targets = verdict.classifyTargets ?? [verdict.subject];
+				const maps = mergeClassifyMaps(
+					config.bashClassify,
+					currentMode ? config.modes[currentMode]?.classify : undefined,
+				);
+				const gradeFallback: GradeAction =
+					config.bashClassify.fallback === "allow" || config.bashClassify.fallback === "deny"
+						? config.bashClassify.fallback
+						: "ask";
+				const graded = await gradeBashUnits(targets, maps, gradeFallback, bashClassify);
+				for (const g of graded) {
+					if (g.action !== "model") rest.push(g.action);
+				}
+				const needsLlm = graded.filter((g) => g.action === "model").map((g) => g.unit);
+				if (needsLlm.length > 0) {
+					rest.push(await classifyVerdict(ctx, modelWhole, needsLlm));
+				}
+			}
+			const modelUnits =
+				verdict.modelTargets ?? (action === "model" ? [modelWhole] : []);
+			if (modelUnits.length > 0) {
+				rest.push(await classifyVerdict(ctx, modelWhole, modelUnits));
 			}
 			action = mostRestrictiveAction(rest, config.model.fallback);
 		}

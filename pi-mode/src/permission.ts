@@ -5,7 +5,7 @@ import type { Action, PermissionRules, SurfaceRule } from "./config.ts";
 
 const FILE_SURFACES = new Set(["read", "write", "edit", "grep", "find", "ls", "externalPath"]);
 
-const ACTION_RANK: Record<Action, number> = { deny: 3, ask: 2, classify: 2, allow: 1 };
+const ACTION_RANK: Record<Action, number> = { deny: 3, ask: 2, classify: 2, model: 2, allow: 1 };
 
 const MINIMATCH_OPTS = { dot: true, nocomment: true } as const;
 
@@ -20,6 +20,8 @@ export interface PermissionVerdict {
 	kind: MatchKind;
 	/** Set when action is classify: units to send, or the whole command. */
 	classifyTargets?: string[];
+	/** Units that resolved straight to `model` (pattern-level LLM dispatch). */
+	modelTargets?: string[];
 	/** Bash units that resolved to ask — what the dialog shows and session-caches. */
 	askUnits?: string[];
 }

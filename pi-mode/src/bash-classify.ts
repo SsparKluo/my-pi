@@ -10,7 +10,7 @@ export interface BashClassifyResult {
 
 export type BashClassifyRunner = (command: string) => Promise<BashClassifyResult>;
 
-const ACTION_RANK: Record<Action, number> = { deny: 3, ask: 2, classify: 2, allow: 1 };
+const ACTION_RANK: Record<Action, number> = { deny: 3, ask: 2, classify: 2, model: 2, allow: 1 };
 
 const DEFAULT_BY_RISK: Record<string, GradeAction> = { LOW: "allow", MEDIUM: "ask", HIGH: "ask" };
 

@@ -4,8 +4,8 @@ import { fileURLToPath } from "node:url";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { parseJsonc } from "./jsonc.ts";
 
-/** A permission action. `classify` routes bash to the grading pipeline. */
-export type Action = "allow" | "deny" | "ask" | "classify";
+/** A permission action. `classify` routes bash to the grading pipeline; `model` defers any surface straight to the small LLM. */
+export type Action = "allow" | "deny" | "ask" | "classify" | "model";
 
 /** A grading verdict: a final action, or `model` to defer to the small LLM. */
 export type GradeAction = "allow" | "deny" | "ask" | "model";
@@ -128,7 +128,7 @@ const MINIMAL_TEMPLATE = `{
 }
 `;
 
-const ACTIONS = new Set<Action>(["allow", "deny", "ask", "classify"]);
+const ACTIONS = new Set<Action>(["allow", "deny", "ask", "classify", "model"]);
 
 function asAction(value: unknown, fallback: Action = "deny"): Action {
 	return typeof value === "string" && ACTIONS.has(value as Action) ? (value as Action) : fallback;

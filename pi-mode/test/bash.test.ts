@@ -98,6 +98,38 @@ describe("elevation and hidden units", () => {
 	});
 });
 
+describe("model action", () => {
+	const rules = { bash: { "*": "allow" as const, "git push *": "model" as const } };
+
+	it("routes matching units straight to the model", () => {
+		const v = ev("git push origin", rules);
+		expect(v.action).toBe("model");
+		expect(v.modelTargets).toEqual(["git push origin"]);
+		expect(ev("ls", rules).action).toBe("allow");
+	});
+
+	it("carries model units alongside classify units", () => {
+		const mixed = { bash: { "*": "classify" as const, "git push *": "model" as const } };
+		const v = ev("ls && git push origin", mixed);
+		expect(v.action).toBe("classify");
+		expect(v.classifyTargets).toEqual(["ls"]);
+		expect(v.modelTargets).toEqual(["git push origin"]);
+	});
+
+	it("uses the whole command when model units exceed the threshold", () => {
+		const v = ev("git push a && git push b && git push c", rules);
+		expect(v.action).toBe("model");
+		expect(v.modelTargets).toBeUndefined();
+		expect(v.subject).toBe("git push a && git push b && git push c");
+	});
+
+	it("routes unparseable model-matched commands whole", () => {
+		const v = ev('git push "unterminated', rules);
+		expect(v.action).toBe("model");
+		expect(v.modelTargets).toBeUndefined();
+	});
+});
+
 describe("parse failure and classify threshold", () => {
 	it("asks (fail-closed) when unbash reports errors, unless already denied or graded", () => {
 		expect(ev("ls &&").action).toBe("ask");
