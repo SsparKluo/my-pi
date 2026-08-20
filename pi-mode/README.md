@@ -2,7 +2,7 @@
 
 A configurable mode-switcher extension for the [pi](https://pi.dev) coding agent.
 
-Modes bundle a permission policy (flat `allow`/`deny`/`ask`/`classify` format),
+Modes bundle a permission policy (flat `allow`/`deny`/`ask`/`classify`/`model` format),
 enter/exit/per-turn prompts, and an AI bash classifier. Mode state persists per
 session and changes are broadcast to other components.
 
@@ -44,7 +44,7 @@ Shipped modes (standalone unless they say `extends`; chains resolve transitively
 | **normal** | No prompts. In-workspace tools allowed (except reading `.env`). bash-classify: `READONLY` + `LOCAL_EFFECTS` allow, else ask. |
 | **plan** | `extends: normal` + `write`/`edit` denied except `**/*.md`; bash classify overlay asks on everything except `READONLY`. `internal: true` — reserved for a future `/plan` command. |
 | **yolo** | `{}` — no `permission` block at all, so no gating: nothing ever asks. |
-| **auto** | `extends: normal`; risky bash (`EXTERNAL_EFFECTS`/`DANGEROUS`/`UNKNOWN`/`MEDIUM`/`HIGH`) and hidden or unparseable units defer to the small LLM instead of asking; `rm` still asks (`sudo rm …` matches `rm *` too — a leading `sudo`/`doas` is stripped). The classifier may only answer `allow`/`ask` and falls back to `ask` when the model chain fails — auto never hard-denies. |
+| **auto** | `extends: normal`; risky bash (`EXTERNAL_EFFECTS`/`DANGEROUS`/`UNKNOWN`/`MEDIUM`/`HIGH`) and hidden or unparseable units defer to the small LLM instead of asking; external-path access outside the skills/tmp allowlist defers to the classifier too; `rm` still asks (`sudo rm …` matches `rm *` too — a leading `sudo`/`doas` is stripped). The classifier may only answer `allow`/`ask` and falls back to `ask` when the model chain fails — auto never hard-denies. |
 
 Omit `permission` for vanilla pi. Modes are config-defined — add your own freely. `extends` gives explicit inheritance: the child deep-merges the parent's `permission` and overlays `classify`/`model` (child keys win); an unknown parent or a cycle makes the whole config fall back to defaults (fail-closed). `internal: true` modes are user-unreachable (`/mode`, selector, cycle, `--pi-mode` all reject/hide them) and exist for programmatic features (e.g. a future `/goal`).
 
@@ -119,9 +119,11 @@ to the in-memory default (`normal` mode, no permission).
 
 - **surfaces**: `bash`, `read`, `write`, `edit`, `grep`, `find`, `ls`, `externalPath`,
   `*` (catch-all for unknown/extension tools).
-- **actions**: `allow` | `deny` | `ask` | `classify` (grade via bash-classify; `byClass`/`byRisk`
-  values are `allow`/`deny`/`ask`/`model` — `model` defers that unit to the small LLM whose
-  `verdicts` may exclude `ask` for hands-off modes). Later bash patterns still overwrite.
+- **actions**: `allow` | `deny` | `ask` | `classify` | `model`. `classify` grades via
+  bash-classify; the `byClass`/`byRisk` map values are `allow`/`deny`/`ask`/`model` —
+  `model` defers that unit to the small LLM. As a direct action, `model` skips the
+  grader and defers any surface to the small LLM (e.g. `"read": { "*.env": "model" }`).
+  Later patterns still overwrite.
 - **value forms**:
   - string → single action for the whole surface (e.g. `"read": "allow"`).
   - object → pattern→action map, **last-match-wins** (put general rules first,
@@ -163,7 +165,7 @@ Two-phase:
    - `bash` → unbash cascade (parse → strip transparent wrappers → per-unit
      eval → classifier when `classify`)
    - other tools → pattern match
-   - action → allow / deny / ask dialog / classify
+   - action → allow / deny / ask dialog / classify (graded) / `model` (straight to the classifier)
 
 Fail-closed everywhere: unknown → ask/deny, never silent allow. Session
 approvals (from the ask dialog's "Allow for session") record the matched
@@ -187,7 +189,7 @@ Non-interactive sessions (`!ctx.hasUI`) deny on `ask` (fail-closed).
 
 ### Classifier
 
-Triggered only when a bash unit/surface resolves to `classify` (e.g. auto mode).
+Triggered when a bash unit/surface resolves to `classify` (graded) or `model`, or when any other surface's rule says `model` (target becomes `"<surface> <subject>"`, e.g. `read /home/x/.env`).
 
 - Model: `model.model` (`provider/modelId[:thinkingLevel]`) via `modelRegistry.complete`
 - Context: classifier prompt + pi-loaded agents files + previous user / last assistant / current user + whole original command + the uncertain unit(s)

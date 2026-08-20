@@ -100,7 +100,10 @@
       },
       "model": { "verdicts": ["allow", "ask"], "fallback": "ask" },
       "permission": {
-        "bash": { "*": "classify", "rm": "ask", "rm *": "ask" }
+        "bash": { "*": "classify", "rm": "ask", "rm *": "ask" },
+        // external access judged by the classifier too (skills/tmp allowlist
+        // from normal still wins — last-match-wins keeps it after "*")
+        "externalPath": { "*": "model" }
       }
     }
   }
@@ -109,12 +112,14 @@
 // ── Schema ──────────────────────────────────────────────────────────
 //
 // surfaces:  bash | read | write | edit | grep | find | ls | externalPath | *
-// actions:   allow | deny | ask | classify
+// actions:   allow | deny | ask | classify | model
 // classify:  grade via bash-classify, then byClass/byRisk pick the verdict.
 //            sudo/doas-prefixed units are pattern-matched on their inner command
 //            (`sudo rm …` matches "rm *"); eval/bash -c/$(…)/compound and
 //            unparseable commands grade like any other unit (UNKNOWN when the
 //            grader cannot see inside), so they reach the model in auto.
+// model:     defer straight to the small LLM, any surface — a bash unit or a file
+//            path (e.g. "read": { "*.env": "model" }); no grader involved.
 // grade verdicts (byClass/byRisk values): allow | deny | ask | model
 //            "model" = defer that unit to the small LLM (model.verdicts picks its answers;
 //            omit "deny" for a never-deny classifier, e.g. auto's allow/ask).

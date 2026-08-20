@@ -42,11 +42,11 @@ AI bash classifier.
 | Ref | Decision |
 |---|---|
 | Q1 | Config-defined arbitrary modes; standalone by default, `extends` for explicit policy inheritance; template ships normal/plan/yolo/auto (plan/auto extend normal). |
-| Q2 | Standalone; flat permission format (`allow`/`deny`/`ask`/`classify`, last-match-wins). |
+| Q2 | Standalone; flat permission format (`allow`/`deny`/`ask`/`classify`/`model`, last-match-wins). |
 | Q3 | `permission` block optional (omit → prompt-only). `classify` is a first-class action. Global `commandWrappers`. |
 | Q4 | Three optional prompt fields emitted as their own block at send time (never the system prompt — that would bust the KV-cache prefix): `onEnterPrompt`/`onExitPrompt` on a mode change (displayed as a compact label), `perTurnPrompt` while staying in a mode (invisible, model-only). State persisted via session entry. |
 | Q5 | Broadcast `pi-mode:changed` event + footer status line + session-entry-readable. UX: `--pi-mode` flag, `/mode` command + selector, cycle shortcut. No service accessor yet. |
-| Q6 | `classify` grades via bash-classify (`byClass`/`byRisk` → allow/ask/deny/`model`); `model` defers the unit to the small LLM (`model.verdicts` picks the answers — auto ships allow/ask so it never denies; multiple hits parse to the most restrictive). Explicit bash patterns still win (last-match-wins). |
+| Q6 | `classify` grades via bash-classify (`byClass`/`byRisk` → allow/ask/deny/`model`); `model` — as a map verdict or a direct action on any surface (bash unit or file path, target `"<surface> <subject>"`) — defers to the small LLM (`model.verdicts` picks the answers — auto ships allow/ask so it never denies; multiple hits parse to the most restrictive). Explicit bash patterns still win (last-match-wins). |
 | Q7 | Ask dialog = custom TUI (`ctx.ui.custom`); codeblock, foldable, max-height internal scroll; session approvals record the matched pattern; fail-closed non-interactive deny. |
 | §38 | `unbash` parses bash to AST before classification. |
 | §47 | Transparent wrappers (`rtk`, …) and privilege elevators (`sudo`/`doas`, unless a flag follows) stripped before pattern matching; indirection (`eval`, `bash -c`, `$(…)`, compounds) is graded, not forced to ask — the grader recurses into inner commands. |
