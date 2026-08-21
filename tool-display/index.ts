@@ -34,6 +34,7 @@ import {
 	isErrorResult,
 	splitTrailingNoticeBlock,
 } from "./utils.ts";
+import { formatBashTimingLine, isRtkRewrite } from "./rtk-rewrite.ts";
 
 type BuiltInTools = ReturnType<typeof createBuiltInTools>;
 type Theme = Parameters<NonNullable<Parameters<ExtensionAPI["registerTool"]>[0]["renderCall"]>>[1];
@@ -300,10 +301,37 @@ function renderVisualTail(
 	};
 }
 
+const RTK_REWRITE_RECORD_TTL_MS = 60_000;
+const originalBashCommands = new Map<string, string>();
+const rewrittenBashCommands = new Set<string>();
+
+function commandFromToolInput(value: unknown): string | undefined {
+	if (!value || typeof value !== "object" || Array.isArray(value)) {
+		return undefined;
+	}
+	const command = (value as { command?: unknown }).command;
+	return typeof command === "string" ? command : undefined;
+}
+
+function rememberRtkRewrite(toolCallId: unknown, original: unknown, actual: unknown): void {
+	if (typeof toolCallId !== "string") {
+		return;
+	}
+	const originalCommand = typeof original === "string" ? original : undefined;
+	const actualCommand = typeof actual === "string" ? actual : undefined;
+	if (!originalCommand || !actualCommand) {
+		return;
+	}
+	if (isRtkRewrite(originalCommand, actualCommand)) {
+		rewrittenBashCommands.add(toolCallId);
+	}
+}
+
 type BashRenderState = {
 	startedAt?: number;
 	endedAt?: number;
 	interval?: ReturnType<typeof setInterval>;
+	rtkRewritten?: boolean;
 };
 
 function pad2(n: number): string {
@@ -351,8 +379,7 @@ function bashTimingLine(
 	const end = state.endedAt ?? Date.now();
 	const duration = formatDuration(end - state.startedAt);
 	const when = formatTimestamp(state.startedAt);
-	const label = isPartial ? "elapsed" : "took";
-	return theme.fg("muted", `\uF017 ${label} ${duration} · ${when}`);
+	return theme.fg("muted", formatBashTimingLine(duration, when, isPartial, state.rtkRewritten === true));
 }
 
 /** Expanded bash view: output (+ full command only when call folded it away). */
@@ -538,6 +565,9 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 					viewKey?: string;
 					viewComponent?: Component;
 				};
+				if (rewrittenBashCommands.has(context.toolCallId)) {
+					state.rtkRewritten = true;
+				}
 				const timing = bashTimingLine(state, isPartial, context.executionStarted, context.invalidate, theme);
 				// While running, timing changes every second so the key must include it.
 				// After completion the result is immutable and the component is reused across invalidates.
@@ -1012,6 +1042,28 @@ installToolShellPatch();
 
 export default function (pi: ExtensionAPI) {
 	let registered = false;
+
+	pi.on("tool_execution_start", (event) => {
+		if (event.toolName !== "bash") {
+			return;
+		}
+		const command = commandFromToolInput(event.args);
+		if (command !== undefined) {
+			originalBashCommands.set(event.toolCallId, command);
+		}
+	});
+
+	pi.on("tool_result", (event) => {
+		if (event.toolName !== "bash") {
+			return;
+		}
+		rememberRtkRewrite(event.toolCallId, originalBashCommands.get(event.toolCallId), commandFromToolInput(event.input));
+	});
+
+	pi.on("tool_execution_end", (event) => {
+		originalBashCommands.delete(event.toolCallId);
+		setTimeout(() => rewrittenBashCommands.delete(event.toolCallId), RTK_REWRITE_RECORD_TTL_MS).unref?.();
+	});
 
 	pi.on("session_start", (_event, ctx) => {
 		if (registered) {

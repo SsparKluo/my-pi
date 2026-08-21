@@ -125,7 +125,7 @@ Footer line 1/2 also surface other extensions' `ctx.ui.setStatus` values:
 
 ## tool-display — tool call/result chrome
 
-**What it does.** Overrides rendering for `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, `ffgrep`, `fffind`. Adaptive edit diffs, fuller bash expand, muted chrome. Does **not** touch user-message rendering.
+**What it does.** Overrides rendering for `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, `ffgrep`, `fffind`. Adaptive edit diffs, fuller bash expand, muted chrome. When `pi-rtk-optimizer` rewrites a Bash command, the final timing line appends `· rtk rewritten`. Does **not** touch user-message rendering.
 
 ### Config: `~/.pi/agent/tool-display.json`
 
