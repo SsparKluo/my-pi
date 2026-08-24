@@ -17,8 +17,15 @@ export function formatBashTimingLine(
 	when: string,
 	isPartial: boolean,
 	rtkRewritten: boolean,
+	totalLines?: number,
 ): string {
 	const label = isPartial ? "elapsed" : "took";
-	const rewriteMarker = !isPartial && rtkRewritten ? RTK_REWRITE_MARKER : "";
-	return `\uF017 ${label} ${duration} · ${when}${rewriteMarker}`;
+	let line = `\uF017 ${label} ${duration} · ${when}`;
+	if (!isPartial && typeof totalLines === "number") {
+		line += ` · ${totalLines} ${totalLines === 1 ? "line" : "lines"}`;
+	}
+	if (!isPartial && rtkRewritten) {
+		line += RTK_REWRITE_MARKER;
+	}
+	return line;
 }

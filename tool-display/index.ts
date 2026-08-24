@@ -264,10 +264,19 @@ function renderRawText(value: string, theme: Theme, isError: boolean): Component
 	return text(isError ? theme.fg("error", output) : output);
 }
 
+function styledTiming(timingPlain: string, theme: Theme, truncated: boolean, skippedLines: number): string {
+	let line = theme.fg("muted", timingPlain);
+	if (truncated) {
+		line += ` ${theme.fg("muted", "·")} ${theme.fg("muted", `${skippedLines} earlier`)} ${theme.fg("muted", "·")} ${editorHint("to expand", theme)}`;
+	}
+	return line;
+}
+
 function renderVisualTail(
 	output: string,
 	prefix: string | undefined,
-	suffix: string | undefined,
+	warning: string | undefined,
+	timingPlain: string | undefined,
 	theme: Theme,
 	previewLines: number,
 ): Component {
@@ -281,12 +290,12 @@ function renderVisualTail(
 			}
 			const outputLines = new Text(output, 0, 0).render(safeWidth);
 			const skippedLines = Math.max(outputLines.length - previewLines, 0);
+			const truncated = skippedLines > 0;
+			const timingStyled = timingPlain ? styledTiming(timingPlain, theme, truncated, skippedLines) : undefined;
+			const suffix = joinSections(warning, timingStyled);
 			const lines: string[] = [];
 			if (prefix) {
 				lines.push(...new Text(prefix, 0, 0).render(safeWidth));
-			}
-			if (skippedLines > 0) {
-				lines.push(...new Text(fullOutputHint(skippedLines, theme), 0, 0).render(safeWidth));
 			}
 			lines.push(...outputLines.slice(-previewLines));
 			if (suffix) {
@@ -351,13 +360,13 @@ function formatDuration(ms: number): string {
 	return `${(ms / 1000).toFixed(1)}s`;
 }
 
-/** Track bash start/end on renderer state; return a muted timing line when known. */
-function bashTimingLine(
+/** Track bash start/end on renderer state; return the plain timing line (without theme) when known. */
+function bashTimingPlain(
 	state: BashRenderState,
 	isPartial: boolean,
 	executionStarted: boolean,
 	invalidate: () => void,
-	theme: Theme,
+	totalLines: number | undefined,
 ): string | undefined {
 	if (executionStarted && state.startedAt === undefined) {
 		state.startedAt = Date.now();
@@ -379,7 +388,7 @@ function bashTimingLine(
 	const end = state.endedAt ?? Date.now();
 	const duration = formatDuration(end - state.startedAt);
 	const when = formatTimestamp(state.startedAt);
-	return theme.fg("muted", formatBashTimingLine(duration, when, isPartial, state.rtkRewritten === true));
+	return formatBashTimingLine(duration, when, isPartial, state.rtkRewritten === true, totalLines);
 }
 
 /** Expanded bash view: output (+ full command only when call folded it away). */
@@ -388,7 +397,7 @@ function renderExpandedBash(
 	output: string,
 	status: string | undefined,
 	warning: string | undefined,
-	timing: string | undefined,
+	timingPlain: string | undefined,
 	theme: Theme,
 	revealCommand: boolean,
 ): Component {
@@ -421,8 +430,8 @@ function renderExpandedBash(
 			if (warning) {
 				lines.push(...new Text(warning, 0, 0).render(safeWidth));
 			}
-			if (timing) {
-				lines.push(...new Text(timing, 0, 0).render(safeWidth));
+			if (timingPlain) {
+				lines.push(...new Text(theme.fg("muted", timingPlain), 0, 0).render(safeWidth));
 			}
 			cachedWidth = safeWidth;
 			cachedLines = lines;
@@ -568,7 +577,20 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 				if (rewrittenBashCommands.has(context.toolCallId)) {
 					state.rtkRewritten = true;
 				}
-				const timing = bashTimingLine(state, isPartial, context.executionStarted, context.invalidate, theme);
+				let totalLines: number | undefined;
+				let errorOutput: string | undefined;
+				let previewSource: string | undefined;
+				let previewNotice: string | undefined;
+				if (isError) {
+					errorOutput = resultText.trim();
+					totalLines = isPartial ? undefined : errorOutput.length > 0 ? countLines(errorOutput) : 0;
+				} else {
+					const split = splitTrailingNoticeBlock(resultText);
+					previewNotice = split.notice;
+					previewSource = (split.body.length > 0 ? split.body : resultText).trim();
+					totalLines = isPartial ? undefined : previewSource.length > 0 ? countLines(previewSource) : 0;
+				}
+				const timingPlain = bashTimingPlain(state, isPartial, context.executionStarted, context.invalidate, totalLines);
 				// While running, timing changes every second so the key must include it.
 				// After completion the result is immutable and the component is reused across invalidates.
 				const viewKey = [
@@ -577,7 +599,7 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 					isError ? "1" : "0",
 					resultText,
 					command,
-					timing ?? "",
+					timingPlain ?? "",
 				].join("\0");
 				if (state.viewKey === viewKey && state.viewComponent) {
 					return state.viewComponent;
@@ -585,22 +607,25 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 
 				let component: Component;
 				if (isError) {
-					const output = resultText.trim();
+					const output = errorOutput ?? resultText.trim();
 					const prefix = theme.fg("error", "command failed");
-					component = !expanded && output.length > 0
-						? renderVisualTail(theme.fg("error", output), prefix, timing, theme, config.bashPreviewLines)
-						: text(joinSections(prefix, output.length > 0 ? theme.fg("error", output) : undefined, timing));
+					if (!expanded && output.length > 0) {
+						component = renderVisualTail(theme.fg("error", output), prefix, undefined, timingPlain, theme, config.bashPreviewLines);
+					} else {
+						const timingStyled = timingPlain ? theme.fg("muted", timingPlain) : undefined;
+						component = text(joinSections(prefix, output.length > 0 ? theme.fg("error", output) : undefined, timingStyled));
+					}
 				} else {
-					const { body, notice } = splitTrailingNoticeBlock(resultText);
-					const previewSource = (body.length > 0 ? body : resultText).trim();
+					const bodySource = previewSource ?? "";
 					const status = isPartial ? theme.fg("warning", "running...") : undefined;
-					const warning = warningLine(notice, theme);
+					const warning = warningLine(previewNotice, theme);
 
-					if (!expanded && previewSource.length > 0) {
+					if (!expanded && bodySource.length > 0) {
 						component = renderVisualTail(
-							theme.fg("toolOutput", previewSource),
+							theme.fg("toolOutput", bodySource),
 							status,
-							joinSections(warning, timing),
+							warning,
+							timingPlain,
 							theme,
 							config.bashPreviewLines,
 						);
@@ -608,18 +633,19 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 						const commandFolded = command.replace(/\r\n/g, "\n").split("\n").length > config.bashCallPreviewLines;
 						component = renderExpandedBash(
 							command,
-							previewSource,
+							bodySource,
 							status,
 							warning,
-							timing,
+							timingPlain,
 							theme,
 							config.bashRevealCommand && commandFolded,
 						);
 					} else {
-						const display = previewSource.length > 0
-							? theme.fg("toolOutput", previewSource)
+						const display = bodySource.length > 0
+							? theme.fg("toolOutput", bodySource)
 							: !isPartial ? theme.fg("muted", "(no output)") : undefined;
-						component = text(joinSections(status, display, warning, timing));
+						const timingStyled = timingPlain ? theme.fg("muted", timingPlain) : undefined;
+						component = text(joinSections(status, display, warning, timingStyled));
 					}
 				}
 				const framed = padBlock(component);
