@@ -1067,8 +1067,6 @@ function installToolShellPatch(): void {
 installToolShellPatch();
 
 export default function (pi: ExtensionAPI) {
-	let registered = false;
-
 	pi.on("tool_execution_start", (event) => {
 		if (event.toolName !== "bash") {
 			return;
@@ -1092,9 +1090,6 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("session_start", (_event, ctx) => {
-		if (registered) {
-			return;
-		}
 		const { config, errors } = loadConfig();
 		if (errors.length > 0) {
 			// Surface config problems without blocking startup; invalid fields fall back to defaults.
@@ -1106,6 +1101,5 @@ export default function (pi: ExtensionAPI) {
 		registerOverrides(pi, ctx.cwd, config);
 		// registerOverrides triggers refreshTools, which re-runs the shell/FFF patch with live config.
 		pi.setActiveTools(activeTools);
-		registered = true;
 	});
 }
