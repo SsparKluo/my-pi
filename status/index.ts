@@ -407,7 +407,8 @@ function buildFullConversationPrompt(entries: SessionEntry[]): string {
 
 // ── Auto-title model selection ──
 // Prefer a cheap model declared in settings.json (smallModel) for title
-// generation; fall back to the active session model.
+// generation; fall back to the active session model when absent, unauthenticated,
+// or the smallModel call fails.
 
 const SETTINGS_PATH = path.join(
   process.env.HOME || process.env.USERPROFILE || "~",
@@ -446,17 +447,46 @@ function resolveModelReference(ctx: ExtensionContext, reference: string): Model<
   return model;
 }
 
-function resolveTitleModel(ctx: ExtensionContext): Model<Api> | undefined {
+function resolveTitleModels(ctx: ExtensionContext): Model<Api>[] {
+  const chain: Model<Api>[] = [];
+  const seen = new Set<string>();
+  const push = (model: Model<Api> | undefined) => {
+    if (!model || !ctx.modelRegistry.hasConfiguredAuth(model)) return;
+    const key = `${model.provider}/${model.id}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    chain.push(model);
+  };
   try {
     const raw = fs.readFileSync(SETTINGS_PATH, "utf-8");
     const settings = JSON.parse(raw) as Record<string, unknown>;
     const ref = settings.smallModel;
     if (typeof ref === "string" && ref.trim()) {
-      const model = resolveModelReference(ctx, ref.trim());
-      if (model && ctx.modelRegistry.hasConfiguredAuth(model)) return model;
+      push(resolveModelReference(ctx, ref.trim()));
     }
   } catch { /* settings unreadable */ }
-  return ctx.model;
+  push(ctx.model);
+  return chain;
+}
+
+async function completeTitle(
+  ctx: ExtensionContext,
+  model: Model<Api>,
+  prompt: string,
+): Promise<string | undefined> {
+  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+  if (!auth?.ok || !auth.apiKey) return undefined;
+  const response = await complete(model, {
+    messages: [
+      { role: "user" as const, content: [{ type: "text" as const, text: prompt }], timestamp: Date.now() },
+    ],
+  }, { apiKey: auth.apiKey, headers: auth.headers, maxTokens: 30 });
+  const title = response.content
+    .filter((c): c is { type: "text"; text: string } => c.type === "text")
+    .map((c) => c.text.trim()).join("")
+    .replace(/^["']|["']$/g, "").trim();
+  if (title && title.length > 0 && title.length <= 80) return title;
+  return undefined;
 }
 
 // Core generation, shared by the auto path and the /generate-title command.
@@ -472,28 +502,21 @@ async function generateTitle(
   if (force) pi.setSessionName("");
   else if (pi.getSessionName()) return;
   if (!prompt) return;
-  const model = resolveTitleModel(ctx);
-  if (!model) return;
+  const models = resolveTitleModels(ctx);
+  if (models.length === 0) return;
   state.isAutoTitling = true;
   try {
-    const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-    if (!auth?.ok || !auth.apiKey) return;
-    const response = await complete(model, {
-      messages: [
-        { role: "user" as const, content: [{ type: "text" as const, text: prompt }], timestamp: Date.now() },
-      ],
-    }, { apiKey: auth.apiKey, headers: auth.headers, maxTokens: 30 });
-    const title = response.content
-      .filter((c): c is { type: "text"; text: string } => c.type === "text")
-      .map((c) => c.text.trim()).join("")
-      .replace(/^["']|["']$/g, "").trim();
-    if (title && title.length > 0 && title.length <= 80) {
-      pi.setSessionName(title);
-      if (!state.isWorking) ctx.ui.setTitle(buildIdleTitle(pi));
-      syncHerdrTabTitle(pi);
+    for (const model of models) {
+      try {
+        const title = await completeTitle(ctx, model, prompt);
+        if (!title) continue;
+        pi.setSessionName(title);
+        if (!state.isWorking) ctx.ui.setTitle(buildIdleTitle(pi));
+        syncHerdrTabTitle(pi);
+        return;
+      } catch { /* try next candidate */ }
     }
-  } catch { /* best-effort */ }
-  finally { state.isAutoTitling = false; }
+  } finally { state.isAutoTitling = false; }
 }
 
 async function autoGenerateTitle(pi: ExtensionAPI, ctx: ExtensionContext, state: AppState): Promise<void> {

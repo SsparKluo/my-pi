@@ -105,7 +105,7 @@ After the first completed agent turn, status generates a short session title. Pr
 }
 ```
 
-Syntax: `provider/modelId[:thinkingLevel]`. Valid levels: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Use `:off` to disable reasoning (not `:none`). Falls back to the active session model when absent or unauthenticated.
+Syntax: `provider/modelId[:thinkingLevel]`. Valid levels: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Use `:off` to disable reasoning (not `:none`). Falls back to the active session model when `smallModel` is absent, unauthenticated, or the call fails.
 
 ### Commands
 
