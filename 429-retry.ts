@@ -29,6 +29,64 @@ const MAX_RETRIES = 10;
 // 判定依据（错误标记的来源与逻辑）详见 isHardUsageLimit()。
 const HARD_LIMIT_WAIT_MS = 10 * 60 * 1000; // 10 分钟
 
+const HARD_USAGE_LIMIT_BODY_PATTERN = /FreeUsageLimitError|GoUsageLimitError|UsageLimitError|insufficient_quota|Monthly usage limit|Usage limit reached|(?:使用上限|额度上限|限额)[^。\n]{0,80}(?:重置|恢复)/i;
+const TRANSIENT_RATE_LIMIT_BODY_PATTERN = /当前访问量过大|访问量过大|请求过于频繁|稍后再试/i;
+const RESET_TIME_IN_BODY_PATTERN = /(?:限额(?:将在|于)?|重置(?:时间)?(?:为|是)?|reset(?:s|ting)?(?:\s+(?:at|on))?|renew(?:s|ing)?(?:\s+(?:at|on))?)[^\d]{0,30}(\d{4}-\d{2}-\d{2})[T\s]+(\d{2}:\d{2}(?::\d{2})?)/i;
+
+function isHardUsageLimitBody(body: string): boolean {
+  if (HARD_USAGE_LIMIT_BODY_PATTERN.test(body) && !TRANSIENT_RATE_LIMIT_BODY_PATTERN.test(body)) {
+    return true;
+  }
+
+  try {
+    const parsed = JSON.parse(body) as {
+      code?: string | number;
+      error?: { code?: string | number };
+    };
+    const code = parsed.error?.code ?? parsed.code;
+    return String(code) === "1308";
+  } catch {
+    return false;
+  }
+}
+
+function parseResetTimeFromBody(body: string): number | null {
+  const match = body.match(RESET_TIME_IN_BODY_PATTERN);
+  if (!match) return null;
+
+  const time = match[2].length === 5 ? `${match[2]}:00` : match[2];
+  const resetTime = new Date(`${match[1]}T${time}`).getTime();
+  return Number.isNaN(resetTime) ? null : resetTime;
+}
+
+function createAbortError(signal?: AbortSignal): Error {
+  if (signal?.reason instanceof Error) return signal.reason;
+  const error = new Error("The operation was aborted");
+  error.name = "AbortError";
+  return error;
+}
+
+function abortableSleep(delayMs: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(createAbortError(signal));
+      return;
+    }
+
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const onAbort = () => {
+      if (timeout !== undefined) clearTimeout(timeout);
+      reject(createAbortError(signal));
+    };
+
+    timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, Math.max(delayMs, 0));
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 export default function (pi: ExtensionAPI) {
   // 状态
   let enabled = true;
@@ -53,7 +111,7 @@ export default function (pi: ExtensionAPI) {
   }
 
   // 保存当前的 fetch（可能是 request-logger 的包装版本）
-  const currentFetch = globalThis.fetch;
+  let currentFetch = globalThis.fetch;
 
   /**
    * 从响应中解析等待时间
@@ -162,16 +220,20 @@ export default function (pi: ExtensionAPI) {
    * 重置时间），而不是空转最多约 100 分钟（10 次 × 10 分钟）做无意义的重试。
    */
   async function isHardUsageLimit(response: Response, rawWaitMs: number): Promise<boolean> {
-    // 信号 1：响应 body 中含有明确的不可重试错误类型
+    let body = "";
     try {
       const cloned = response.clone();
-      const body = await cloned.text();
-      if (/FreeUsageLimitError|GoUsageLimitError|UsageLimitError|insufficient_quota|Monthly usage limit/i.test(body)) {
-        return true;
-      }
+      body = await cloned.text();
+      if (isHardUsageLimitBody(body)) return true;
     } catch {
       // 忽略 body 读取失败
     }
+
+    const resetTime = parseResetTimeFromBody(body);
+    if (resetTime !== null && resetTime - Date.now() > HARD_LIMIT_WAIT_MS) {
+      return true;
+    }
+
     // 信号 2：重置窗口超过上限——在合理重试窗口内不会恢复
     return rawWaitMs > HARD_LIMIT_WAIT_MS;
   }
@@ -231,12 +293,20 @@ export default function (pi: ExtensionAPI) {
       actualWaitMs = Math.min(actualWaitMs, HARD_LIMIT_WAIT_MS);
 
       // 倒计时显示（输入框上方黄色警告行，原地更新，不累积）
+      const signal = init?.signal ?? undefined;
       const endTime = Date.now() + actualWaitMs;
-      while (Date.now() < endTime) {
-        const remainingSec = Math.ceil((endTime - Date.now()) / 1000);
-        if (remainingSec <= 0) break;
-        showWidget(`Rate limited (429). Waiting ${remainingSec}s before retry ${attempts}/${MAX_RETRIES}...`);
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+      try {
+        while (Date.now() < endTime) {
+          const remainingSec = Math.ceil((endTime - Date.now()) / 1000);
+          if (remainingSec <= 0) break;
+          showWidget(`Rate limited (429). Waiting ${remainingSec}s before retry ${attempts}/${MAX_RETRIES}...`);
+          await abortableSleep(Math.min(1000, endTime - Date.now()), signal);
+        }
+      } catch (error) {
+        isRateLimited = false;
+        retryCount = 0;
+        showWidget(undefined);
+        throw error;
       }
 
       // 重试请求
@@ -269,7 +339,7 @@ export default function (pi: ExtensionAPI) {
       set(v) {
         // 如果有人覆盖 fetch，更新我们的底层 fetch
         // 这样 request-logger 可以正常工作
-        (currentFetch as any) = v;
+        currentFetch = v as typeof currentFetch;
       },
       configurable: true,
       enumerable: true,
