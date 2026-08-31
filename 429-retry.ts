@@ -217,7 +217,8 @@ export default function (pi: ExtensionAPI) {
    * 2. 重置窗口超过 HARD_LIMIT_WAIT_MS（10 分钟）——在合理重试窗口内不会恢复。
    *
    * 命中后：把原始响应交还上层 SDK，让它抛出错误并停止 agent（错误信息含
-   * 重置时间），而不是空转最多约 100 分钟（10 次 × 10 分钟）做无意义的重试。
+   * 重置时间），而不是空转最多约 100 分钟（10 次 × 10 分钟）做无意义的重试；
+   * 不保留 retry widget。
    */
   async function isHardUsageLimit(response: Response, rawWaitMs: number): Promise<boolean> {
     let body = "";
@@ -278,8 +279,9 @@ export default function (pi: ExtensionAPI) {
       // 硬用量限制（判定见 isHardUsageLimit）：立即失败，把原始响应交还上层
       // SDK，让它抛出错误并停止 agent（同时展示重置时间），而不是空转重试。
       if (await isHardUsageLimit(response, rawWaitMs)) {
-        showWidget("Usage limit reached — surfacing error (no retry)");
         isRateLimited = false;
+        retryCount = 0;
+        showWidget(undefined);
         return response;
       }
 
@@ -320,9 +322,11 @@ export default function (pi: ExtensionAPI) {
       showWidget(undefined);
     }
 
-    // 如果达到最大重试次数仍然 429
+    // 如果达到最大重试次数仍然 429，重试已经结束，清除倒计时状态。
     if ((response.status === 429 || isRewrittenRateLimit(response)) && attempts >= MAX_RETRIES) {
-      showWidget(`Rate limit persists after ${MAX_RETRIES} retries`);
+      isRateLimited = false;
+      retryCount = 0;
+      showWidget(undefined);
     }
 
     return response;

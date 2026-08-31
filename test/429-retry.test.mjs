@@ -14,13 +14,33 @@ function restoreFetch() {
 
 function createPi() {
 	const commands = new Map();
+	const events = new Map();
+	const widgets = [];
+	const context = {
+		ui: {
+			theme: { fg: (_color, text) => text },
+			notify() {},
+			setWidget(key, value, options) {
+				widgets.push({ key, value, options });
+			},
+		},
+	};
 	return {
 		commands,
+		events,
+		widgets,
+		context,
 		registerCommand(name, command) {
 			commands.set(name, command.handler);
 		},
-		on() {},
+		on(name, handler) {
+			events.set(name, handler);
+		},
 	};
+}
+
+function attachContext(pi) {
+	pi.events.get("after_provider_response")({ status: 200 }, pi.context);
 }
 
 async function setWaitTime(pi, seconds = "1") {
@@ -42,6 +62,7 @@ test("hard usage-limit responses from ZAI surface immediately", async () => {
 	try {
 		const pi = createPi();
 		retryExtension(pi);
+		attachContext(pi);
 		await setWaitTime(pi);
 
 		const started = performance.now();
@@ -50,6 +71,7 @@ test("hard usage-limit responses from ZAI surface immediately", async () => {
 		assert.equal(response.status, 429);
 		assert.equal(calls, 1);
 		assert.ok(performance.now() - started < 250);
+		assert.ok(pi.widgets.every(({ value }) => value === undefined));
 	} finally {
 		restoreFetch();
 	}
@@ -93,6 +115,7 @@ test("Esc aborts a transient 429 wait before the next request", async () => {
 	try {
 		const pi = createPi();
 		retryExtension(pi);
+		attachContext(pi);
 		await setWaitTime(pi);
 
 		const controller = new AbortController();
@@ -103,6 +126,7 @@ test("Esc aborts a transient 429 wait before the next request", async () => {
 		await assert.rejects(request, { name: "AbortError" });
 		assert.equal(calls, 1);
 		assert.ok(performance.now() - started < 250);
+		assert.equal(pi.widgets.at(-1).value, undefined);
 	} finally {
 		restoreFetch();
 	}
