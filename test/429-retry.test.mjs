@@ -39,6 +39,18 @@ function createPi() {
 	};
 }
 
+function createStaleContext() {
+	const ctx = {};
+	Object.defineProperty(ctx, "ui", {
+		get() {
+			throw new Error(
+				"This extension ctx is stale after session replacement or reload. Do not use a captured pi or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload().",
+			);
+		},
+	});
+	return ctx;
+}
+
 function attachContext(pi) {
 	pi.events.get("after_provider_response")({ status: 200 }, pi.context);
 }
@@ -172,6 +184,45 @@ test("fetch replacement updates the retry wrapper's underlying fetch", async () 
 		const response = await globalThis.fetch("https://example.test");
 		assert.equal(await response.text(), "replacement");
 		assert.equal(replacementCalls, 1);
+	} finally {
+		restoreFetch();
+	}
+});
+
+test("session_start cleanup timer does not crash on a stale ctx", async () => {
+	try {
+		const pi = createPi();
+		retryExtension(pi);
+
+		// 复现：session 替换后 3s 清理定时器触发，旧 ctx 的 ui getter 抛错
+		// （未修复时 tick 会把 stale 错误作为 uncaughtException 抛出）
+		test.mock.timers.enable({ apis: ["setTimeout"] });
+		await pi.events.get("session_start")({ type: "session_start", reason: "startup" }, createStaleContext());
+		test.mock.timers.tick(3000);
+	} finally {
+		test.mock.timers.reset();
+		restoreFetch();
+	}
+});
+
+test("rate-limit countdown keeps retrying after ctx goes stale", async () => {
+	let calls = 0;
+	globalThis.fetch = async () => {
+		calls++;
+		if (calls === 1) return new Response("slow down", { status: 429 });
+		return new Response("ok", { status: 200 });
+	};
+
+	try {
+		const pi = createPi();
+		retryExtension(pi);
+		await pi.events.get("after_provider_response")({ status: 200 }, createStaleContext());
+		await setWaitTime(pi, "1");
+
+		const response = await globalThis.fetch("https://example.test");
+
+		assert.equal(response.status, 200);
+		assert.equal(calls, 2);
 	} finally {
 		restoreFetch();
 	}

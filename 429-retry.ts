@@ -101,13 +101,20 @@ export default function (pi: ExtensionAPI) {
    * 在输入框上方显示一条黄色（warning）状态行；传 undefined 清除。
    */
   function showWidget(text: string | undefined) {
-    if (text === undefined) {
-      _ctx?.ui?.setWidget?.("429-retry", undefined, { placement: "aboveEditor" });
-      return;
+    // ctx 可能在定时器/倒计时回调触发前已随会话替换（/new、/fork、/resume、reload）失效；
+    // widget 属于旧会话，失败即无需清理，静默跳过（否则 timer 内抛错会作为
+    // uncaughtException 终止 pi 进程）。
+    try {
+      if (text === undefined) {
+        _ctx?.ui?.setWidget?.("429-retry", undefined, { placement: "aboveEditor" });
+        return;
+      }
+      const theme = _ctx?.ui?.theme;
+      if (!theme) return;
+      _ctx?.ui?.setWidget?.("429-retry", [theme.fg("warning", text)], { placement: "aboveEditor" });
+    } catch {
+      // ctx 已失效，忽略
     }
-    const theme = _ctx?.ui?.theme;
-    if (!theme) return;
-    _ctx?.ui?.setWidget?.("429-retry", [theme.fg("warning", text)], { placement: "aboveEditor" });
   }
 
   // 保存当前的 fetch（可能是 request-logger 的包装版本）
