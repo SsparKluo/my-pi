@@ -1,5 +1,6 @@
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import type { TuiMouseEvent } from "@earendil-works/pi-tui";
 import type { AskConfig } from "./config.ts";
 import { sessionApprovalHint, type PermissionVerdict } from "./permission.ts";
 
@@ -25,6 +26,10 @@ export async function showAskDialog(
 			selected: 0,
 			wrapped: [] as string[],
 			wrapWidth: 0,
+			optionStart: -1,
+			totalLines: 0,
+			viewLines: 1,
+			overflowing: false,
 		};
 
 		function maxBody(): number {
@@ -51,6 +56,27 @@ export async function showAskDialog(
 
 		function refresh(): void {
 			tui.requestRender();
+		}
+
+		function handleMouse(event: TuiMouseEvent): { handled: true } | undefined {
+			if (event.type === "click" && event.button === "left") {
+				const idx = event.y - state.optionStart;
+				if (idx < 0 || idx >= OPTIONS.length) return undefined;
+				if (idx === state.selected) {
+					confirm(OPTIONS[idx].id);
+				} else {
+					state.selected = idx;
+					refresh();
+				}
+				return { handled: true };
+			}
+			if (event.type === "wheel" && !state.collapsed && state.overflowing && event.wheelDelta) {
+				state.scroll += event.wheelDelta;
+				clampScroll(state.totalLines, state.viewLines);
+				refresh();
+				return { handled: true };
+			}
+			return undefined;
 		}
 
 		function confirm(id: AskDecision): void {
@@ -135,8 +161,11 @@ export async function showAskDialog(
 				if (overflowing) {
 					const from = state.scroll + 1;
 					const to = state.scroll + slice.length;
-					pushBlock(theme.fg("muted", ` ${from}–${to}/${all.length}  Ctrl+j k`));
+					pushBlock(theme.fg("muted", ` ${from}–${to}/${all.length}  Ctrl+j k · wheel`));
 				}
+				state.totalLines = all.length;
+				state.viewLines = view;
+				state.overflowing = overflowing;
 			}
 			pushBlock("");
 
@@ -145,6 +174,7 @@ export async function showAskDialog(
 			const hint = sessionApprovalHint(verdict, ctx.cwd);
 			const fitted = fitHint(hint, Math.max(16, contentW - 36));
 
+			state.optionStart = lines.length;
 			for (let i = 0; i < OPTIONS.length; i++) {
 				const opt = OPTIONS[i];
 				const selected = i === state.selected;
@@ -163,7 +193,7 @@ export async function showAskDialog(
 			}
 
 			lines.push("");
-			push(theme.fg("dim", "↑↓ select  ·  Enter confirm  ·  Ctrl+] fold"));
+			push(theme.fg("dim", "↑↓ select  ·  Enter confirm  ·  double-click to choose  ·  Ctrl+] fold"));
 			lines.push("");
 			return lines;
 		}
@@ -175,6 +205,7 @@ export async function showAskDialog(
 				state.wrapWidth = 0;
 			},
 			handleInput,
+			handleMouse,
 		};
 	});
 }

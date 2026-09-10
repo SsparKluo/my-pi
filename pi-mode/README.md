@@ -185,6 +185,13 @@ when a path leaves the project cwd.
 | `Ctrl+]` | Collapse / expand command body |
 | `Ctrl+j` `Ctrl+k` | Scroll command body (expanded & overflowing) |
 
+Mouse (fullscreen TUI only; silently unavailable in older pi or inline mode):
+
+| Mouse | Action |
+|-------|--------|
+| Left-click an option | Select it; click the already-selected option again to confirm |
+| Wheel over the body | Scroll command body (expanded & overflowing) |
+
 Non-interactive sessions (`!ctx.hasUI`) deny on `ask` (fail-closed).
 
 ### Classifier
