@@ -62,12 +62,7 @@ export async function showAskDialog(
 			if (event.type === "click" && event.button === "left") {
 				const idx = event.y - state.optionStart;
 				if (idx < 0 || idx >= OPTIONS.length) return undefined;
-				if (idx === state.selected) {
-					confirm(OPTIONS[idx].id);
-				} else {
-					state.selected = idx;
-					refresh();
-				}
+				confirm(OPTIONS[idx].id);
 				return { handled: true };
 			}
 			if (event.type === "wheel" && !state.collapsed && state.overflowing && event.wheelDelta) {
@@ -193,7 +188,7 @@ export async function showAskDialog(
 			}
 
 			lines.push("");
-			push(theme.fg("dim", "↑↓ select  ·  Enter confirm  ·  double-click to choose  ·  Ctrl+] fold"));
+			push(theme.fg("dim", "↑↓ select  ·  Enter confirm  ·  click to choose  ·  Ctrl+] fold"));
 			lines.push("");
 			return lines;
 		}

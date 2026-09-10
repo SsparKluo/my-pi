@@ -189,7 +189,7 @@ Mouse (fullscreen TUI only; silently unavailable in older pi or inline mode):
 
 | Mouse | Action |
 |-------|--------|
-| Left-click an option | Select it; click the already-selected option again to confirm |
+| Left-click an option | Confirm that option |
 | Wheel over the body | Scroll command body (expanded & overflowing) |
 
 Non-interactive sessions (`!ctx.hasUI`) deny on `ask` (fail-closed).
