@@ -1,5 +1,7 @@
 /** Hang column for group body/footer lines. */
 export const GROUP_HANG = 2;
+/** Expand affordance on the collapsed group footer. */
+export const GROUP_ARROW = "▸";
 
 export type ToolCount = {
 	name: string;
@@ -138,7 +140,7 @@ export function withCompactSummary<T>(fn: () => T): T {
  * Lay out a collapsed group (no rail column):
  *   {pad}● {first}
  *   {pad}● {rest…}
- *   {pad}  {footer}
+ *   {pad}  ▸ {footer}
  * Each member row carries its own status dot; wrapped body lines align
  * under the body column.
  */
@@ -146,6 +148,7 @@ export function layoutGroup(options: {
 	paddingX: number;
 	members: Array<{ dot: string; wrapped: string[] }>;
 	footer: string;
+	footerGlyph?: string;
 }): GroupLayout {
 	const pad = " ".repeat(Math.max(0, options.paddingX));
 	const hang = " ".repeat(GROUP_HANG);
@@ -165,6 +168,7 @@ export function layoutGroup(options: {
 	}
 
 	const footerY = lines.length;
-	lines.push(`${pad}${hang}${options.footer}`);
+	const footerGlyph = options.footerGlyph ?? GROUP_ARROW;
+	lines.push(`${pad}${hang}${footerGlyph} ${options.footer}`);
 	return { lines, members, footerY };
 }

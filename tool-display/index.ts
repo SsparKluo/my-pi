@@ -25,6 +25,7 @@ import { renderDiff } from "./diff.ts";
 import { ALL_TOOL_NAMES, loadConfig, type ToolDisplayConfig, type ToolName } from "./config.ts";
 import {
 	formatGroupFooter,
+	GROUP_ARROW,
 	GROUP_HANG,
 	isCompactSummary,
 	joinCompactLine,
@@ -1295,6 +1296,7 @@ function renderGroupedRun(run: ToolComp[], width: number, theme: Theme): string[
 		paddingX: toolBlockPadCols,
 		members,
 		footer: theme.fg("muted", footer),
+		footerGlyph: theme.fg("muted", GROUP_ARROW),
 	});
 	first[TD_GROUP] = { run: run as unknown as ToolExecutionComponent[], layout };
 	first.selfRenderHeight = layout.lines.length;
