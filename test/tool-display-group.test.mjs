@@ -3,7 +3,6 @@ import test from "node:test";
 import {
 	GROUP_BAR,
 	GROUP_CORNER,
-	TIMES,
 	countByAppearance,
 	formatGroupFooter,
 	joinCompactLine,
@@ -17,15 +16,9 @@ test("footer is omitted for a single tool", () => {
 	assert.equal(formatGroupFooter([]), undefined);
 });
 
-test("footer counts types in appearance order with × and ASCII punctuation", () => {
-	assert.equal(
-		formatGroupFooter(["read", "read", "bash"]),
-		`3 tools called: 2 ${TIMES} read, 1 ${TIMES} bash`,
-	);
-	assert.equal(
-		formatGroupFooter(["bash", "read", "read"]),
-		`3 tools called: 1 ${TIMES} bash, 2 ${TIMES} read`,
-	);
+test("footer counts types in appearance order with ASCII punctuation", () => {
+	assert.equal(formatGroupFooter(["read", "read", "bash"]), "3 tools called: 2 read, 1 bash");
+	assert.equal(formatGroupFooter(["bash", "read", "read"]), "3 tools called: 1 bash, 2 read");
 });
 
 test("countByAppearance keeps first-seen order", () => {
@@ -60,13 +53,13 @@ test("layoutGroup draws ● / │ / └ at paddingX", () => {
 	const { lines, members, footerY } = layoutGroup({
 		paddingX: 1,
 		members: [["read foo.ts · 24 lines"], ["read bar.ts · 12 lines"], ["bash $ ls · 3 lines"]],
-		footer: `3 tools called: 2 ${TIMES} read, 1 ${TIMES} bash`,
+		footer: "3 tools called: 2 read, 1 bash",
 	});
 	assert.deepEqual(lines, [
 		" ● read foo.ts · 24 lines",
 		` ${GROUP_BAR} read bar.ts · 12 lines`,
 		` ${GROUP_BAR} bash $ ls · 3 lines`,
-		` ${GROUP_CORNER} 3 tools called: 2 ${TIMES} read, 1 ${TIMES} bash`,
+		` ${GROUP_CORNER} 3 tools called: 2 read, 1 bash`,
 	]);
 	assert.deepEqual(members, [
 		{ y: 0, height: 1 },
@@ -83,14 +76,14 @@ test("layoutGroup keeps │ on wrapped member lines so the bar does not break", 
 			["read very/long/path.ts ·", "24 lines"],
 			["bash $ git add lots of files · 15", "lines"],
 		],
-		footer: `2 tools called: 1 ${TIMES} read, 1 ${TIMES} bash`,
+		footer: "2 tools called: 1 read, 1 bash",
 	});
 	assert.deepEqual(lines, [
 		" ● read very/long/path.ts ·",
 		` ${GROUP_BAR} 24 lines`,
 		` ${GROUP_BAR} bash $ git add lots of files · 15`,
 		` ${GROUP_BAR} lines`,
-		` ${GROUP_CORNER} 2 tools called: 1 ${TIMES} read, 1 ${TIMES} bash`,
+		` ${GROUP_CORNER} 2 tools called: 1 read, 1 bash`,
 	]);
 	assert.deepEqual(members, [
 		{ y: 0, height: 2 },

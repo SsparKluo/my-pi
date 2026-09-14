@@ -1,7 +1,6 @@
 /** Box-drawing chrome for a collapsed parallel tool group. */
 export const GROUP_BAR = "│";
 export const GROUP_CORNER = "└";
-export const TIMES = "×";
 
 export type ToolCount = {
 	name: string;
@@ -23,14 +22,14 @@ export function countByAppearance(names: string[]): ToolCount[] {
 
 /**
  * Footer for a collapsed group of 2+ tools.
- * `3 tools called: 2 × read, 1 × bash`
+ * `3 tools called: 2 read, 1 bash`
  * Returns undefined for a single tool (no footer).
  */
 export function formatGroupFooter(names: string[]): string | undefined {
 	if (names.length < 2) {
 		return undefined;
 	}
-	const parts = countByAppearance(names).map((entry) => `${entry.count} ${TIMES} ${entry.name}`);
+	const parts = countByAppearance(names).map((entry) => `${entry.count} ${entry.name}`);
 	return `${names.length} tools called: ${parts.join(", ")}`;
 }
 
