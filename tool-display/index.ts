@@ -25,13 +25,10 @@ import { renderDiff } from "./diff.ts";
 import { ALL_TOOL_NAMES, loadConfig, type ToolDisplayConfig, type ToolName } from "./config.ts";
 import {
 	formatGroupFooter,
-	GROUP_BAR,
-	GROUP_CORNER,
-	GROUP_TOP,
+	GROUP_HANG,
 	isCompactSummary,
 	joinCompactLine,
 	layoutGroup,
-	SOLO_GLYPH,
 	stripHangPad,
 	stripLeadingCallChrome,
 	withCompactSummary,
@@ -1227,7 +1224,7 @@ function compactBodyFor(component: ToolComp, theme: Theme, fullWidth: number): s
 }
 
 function getCompact(component: ToolComp, theme: Theme, fullWidth: number): CompactCache {
-	const inner = Math.max(fullWidth - toolBlockPadCols - 4, 1);
+	const inner = Math.max(fullWidth - toolBlockPadCols - GROUP_HANG, 1);
 	const cache = component[TD_COMPACT];
 	if (
 		cache &&
@@ -1298,9 +1295,6 @@ function renderGroupedRun(run: ToolComp[], width: number, theme: Theme): string[
 		paddingX: toolBlockPadCols,
 		members,
 		footer: theme.fg("muted", footer),
-		firstGlyph: theme.fg("muted", GROUP_TOP),
-		barGlyph: theme.fg("muted", GROUP_BAR),
-		cornerGlyph: theme.fg("muted", GROUP_CORNER),
 	});
 	first[TD_GROUP] = { run: run as unknown as ToolExecutionComponent[], layout };
 	first.selfRenderHeight = layout.lines.length;
@@ -1311,10 +1305,9 @@ function renderOneLiner(component: ToolComp, width: number, theme: Theme): strin
 	delete component[TD_GROUP];
 	const wrapped = getCompact(component, theme, width).wrapped;
 	const dot = statusDot(theme, { isError: component.result?.isError, isPartial: component.isPartial });
-	const contPad = " ".repeat(toolBlockPadCols + 4);
 	const lines = [""];
 	wrapped.forEach((core, index) => {
-		lines.push(index === 0 ? `${toolBlockPad}${theme.fg("muted", SOLO_GLYPH)} ${dot} ${core}` : `${contPad}${core}`);
+		lines.push(index === 0 ? `${toolBlockPad}${dot} ${core}` : `${toolResultPad}${core}`);
 	});
 	component.selfRenderHeight = lines.length - 1;
 	return lines;

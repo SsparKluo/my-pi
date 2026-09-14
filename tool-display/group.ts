@@ -1,9 +1,5 @@
-/** Box-drawing chrome for a collapsed parallel tool group. */
-export const GROUP_TOP = "┌";
-export const GROUP_BAR = "│";
-export const GROUP_CORNER = "└";
-/** Rail glyph for a solo (ungrouped) collapsed tool. */
-export const SOLO_GLYPH = "-";
+/** Hang column for group body/footer lines. */
+export const GROUP_HANG = 2;
 
 export type ToolCount = {
 	name: string;
@@ -139,25 +135,20 @@ export function withCompactSummary<T>(fn: () => T): T {
 }
 
 /**
- * Lay out a collapsed group:
- *   {pad}┌ ● {first}
- *   {pad}│ ● {rest…}
- *   {pad}└ {footer}
- * Each member row carries its own status dot; wrapped body lines keep │
- * so the vertical bar does not break, aligned under the body column.
+ * Lay out a collapsed group (no rail column):
+ *   {pad}● {first}
+ *   {pad}● {rest…}
+ *   {pad}  {footer}
+ * Each member row carries its own status dot; wrapped body lines align
+ * under the body column.
  */
 export function layoutGroup(options: {
 	paddingX: number;
 	members: Array<{ dot: string; wrapped: string[] }>;
 	footer: string;
-	firstGlyph?: string;
-	barGlyph?: string;
-	cornerGlyph?: string;
 }): GroupLayout {
 	const pad = " ".repeat(Math.max(0, options.paddingX));
-	const firstGlyph = options.firstGlyph ?? GROUP_TOP;
-	const barGlyph = options.barGlyph ?? GROUP_BAR;
-	const cornerGlyph = options.cornerGlyph ?? GROUP_CORNER;
+	const hang = " ".repeat(GROUP_HANG);
 	const lines: string[] = [];
 	const members: GroupMemberLayout[] = [];
 
@@ -167,17 +158,13 @@ export function layoutGroup(options: {
 		const y = lines.length;
 		for (let row = 0; row < wrapped.length; row++) {
 			const body = wrapped[row] ?? "";
-			if (row === 0) {
-				const glyph = i === 0 ? firstGlyph : barGlyph;
-				lines.push(body.length > 0 ? `${pad}${glyph} ${member.dot} ${body}` : `${pad}${glyph} ${member.dot}`);
-			} else {
-				lines.push(body.length > 0 ? `${pad}${barGlyph}   ${body}` : `${pad}${barGlyph}`);
-			}
+			const prefix = row === 0 ? `${pad}${member.dot} ` : `${pad}${hang}`;
+			lines.push(body.length > 0 ? `${prefix}${body}` : prefix.trimEnd());
 		}
 		members.push({ y, height: Math.max(wrapped.length, 1) });
 	}
 
 	const footerY = lines.length;
-	lines.push(`${pad}${cornerGlyph} ${options.footer}`);
+	lines.push(`${pad}${hang}${options.footer}`);
 	return { lines, members, footerY };
 }
