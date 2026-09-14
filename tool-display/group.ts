@@ -140,7 +140,7 @@ export function withCompactSummary<T>(fn: () => T): T {
  * Lay out a collapsed group (no rail column):
  *   {pad}● {first}
  *   {pad}● {rest…}
- *   {pad}  ▸ {footer}
+ *   {pad}▸ {footer}
  * Each member row carries its own status dot; wrapped body lines align
  * under the body column.
  */
@@ -169,6 +169,6 @@ export function layoutGroup(options: {
 
 	const footerY = lines.length;
 	const footerGlyph = options.footerGlyph ?? GROUP_ARROW;
-	lines.push(`${pad}${hang}${footerGlyph} ${options.footer}`);
+	lines.push(`${pad}${footerGlyph} ${options.footer}`);
 	return { lines, members, footerY };
 }

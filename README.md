@@ -131,7 +131,7 @@ Footer line 1/2 also surface other extensions' `ctx.ui.setStatus` values:
  ● read foo.ts · 24 lines
  ● read bar.ts · 12 lines
  ● bash $ ls · 3 lines
-   ▸ 3 tools called: 2 read, 1 bash
+ ▸ 3 tools called: 2 read, 1 bash
 ```
 
 Click a member line to expand just that call; click the `└` footer to expand the whole batch (splits back into independent blocks). When `pi-rtk-optimizer` rewrites a Bash command, the final timing line appends `· rtk rewritten`. Does **not** touch user-message rendering.
