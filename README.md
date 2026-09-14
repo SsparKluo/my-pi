@@ -125,13 +125,13 @@ Footer line 1/2 also surface other extensions' `ctx.ui.setStatus` values:
 
 ## tool-display — tool call/result chrome
 
-**What it does.** Overrides rendering for `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, `ffgrep`, `fffind`. Adaptive edit diffs, fuller bash expand, muted chrome. Collapsed calls are one line (`● read foo.ts · 24 lines`; the dot is red on failure, error text appears on expand). Consecutive tool calls — one parallel batch or several back-to-back rounds with no assistant text in between — collapse into one block, each member keeping its own status dot:
+**What it does.** Overrides rendering for `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, `ffgrep`, `fffind`. Adaptive edit diffs, fuller bash expand, muted chrome. Collapsed calls are one line (`● read foo.ts · 24 lines`; the dot is red on failure, error text appears on expand). Consecutive tool calls — one parallel batch or several back-to-back rounds with no assistant text in between — collapse into one block, each member keeping its own status dot (the footer calls out failures per type):
 
 ```
  ● read foo.ts · 24 lines
  ● read bar.ts · 12 lines
  ● bash $ ls · 3 lines
- ▸ 3 tools called: 2 read, 1 bash
+ ▸ 3 tools called: 2 read, 1 bash ✗
 ```
 
 Click a member line to expand just that call; click the `└` footer to expand the whole batch (splits back into independent blocks). When `pi-rtk-optimizer` rewrites a Bash command, the final timing line appends `· rtk rewritten`. Does **not** touch user-message rendering.

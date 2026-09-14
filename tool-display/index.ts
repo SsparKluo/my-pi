@@ -1280,14 +1280,14 @@ function expandedBodies(component: ToolComp, theme: Theme, fullWidth: number): s
 
 function renderGroupedRun(run: ToolComp[], width: number, theme: Theme): string[] {
 	const members: Array<{ dot: string; wrapped: string[] }> = [];
-	const names: string[] = [];
 	for (const member of run) {
-		names.push(member.toolName);
 		const titleWrapped = getCompact(member, theme, width).wrapped;
 		const dot = statusDot(theme, { isError: member.result?.isError, isPartial: member.isPartial });
 		members.push(member.expanded ? { dot, wrapped: [...titleWrapped, ...expandedBodies(member, theme, width)] } : { dot, wrapped: titleWrapped });
 	}
-	const footer = formatGroupFooter(names);
+	const footer = formatGroupFooter(
+		run.map((member) => ({ name: member.toolName, isError: member.result?.isError })),
+	);
 	if (!footer) {
 		return [];
 	}

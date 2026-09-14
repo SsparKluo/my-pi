@@ -3,7 +3,6 @@ import test from "node:test";
 import {
 	GROUP_ARROW,
 	GROUP_HANG,
-	countByAppearance,
 	formatGroupFooter,
 	joinCompactLine,
 	layoutGroup,
@@ -11,22 +10,27 @@ import {
 	stripLeadingCallChrome,
 } from "../tool-display/group.ts";
 
+const ok = (name) => ({ name, isError: false });
+const bad = (name) => ({ name, isError: true });
+
 test("footer is omitted for a single tool", () => {
-	assert.equal(formatGroupFooter(["read"]), undefined);
+	assert.equal(formatGroupFooter([ok("read")]), undefined);
 	assert.equal(formatGroupFooter([]), undefined);
 });
 
-test("footer counts types in appearance order with ASCII punctuation", () => {
-	assert.equal(formatGroupFooter(["read", "read", "bash"]), "3 tools called: 2 read, 1 bash");
-	assert.equal(formatGroupFooter(["bash", "read", "read"]), "3 tools called: 1 bash, 2 read");
-});
-
-test("countByAppearance keeps first-seen order", () => {
-	assert.deepEqual(countByAppearance(["grep", "read", "grep", "bash"]), [
-		{ name: "grep", count: 2 },
-		{ name: "read", count: 1 },
-		{ name: "bash", count: 1 },
-	]);
+test("footer counts types in appearance order and marks failures", () => {
+	assert.equal(
+		formatGroupFooter([ok("read"), ok("read"), ok("bash")]),
+		"3 tools called: 2 read, 1 bash",
+	);
+	assert.equal(
+		formatGroupFooter([bad("bash"), ok("read"), ok("read")]),
+		"3 tools called: 1 bash ✗, 2 read",
+	);
+	assert.equal(
+		formatGroupFooter([ok("edit"), bad("edit"), ok("edit"), ok("grep")]),
+		"4 tools called: 3 edit (2✓ 1✗), 1 grep",
+	);
 });
 
 test("stripLeadingCallChrome drops pad and the status dot, keeping ANSI in the body", () => {

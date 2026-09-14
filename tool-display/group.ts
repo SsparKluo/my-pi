@@ -8,30 +8,48 @@ export type ToolCount = {
 	count: number;
 };
 
-/** Counts tool names in first-seen order. */
-export function countByAppearance(names: string[]): ToolCount[] {
-	const order: string[] = [];
-	const counts = new Map<string, number>();
-	for (const name of names) {
-		if (!counts.has(name)) {
-			order.push(name);
-		}
-		counts.set(name, (counts.get(name) ?? 0) + 1);
-	}
-	return order.map((name) => ({ name, count: counts.get(name) ?? 0 }));
-}
+export type ToolStatus = {
+	name: string;
+	isError?: boolean;
+};
 
 /**
  * Footer for a collapsed group of 2+ tools.
  * `3 tools called: 2 read, 1 bash`
+ * Failures are called out per type: all failed `1 bash ✗`, mixed
+ * `3 edit (2✓ 1✗)`; clean types stay unmarked.
  * Returns undefined for a single tool (no footer).
  */
-export function formatGroupFooter(names: string[]): string | undefined {
-	if (names.length < 2) {
+export function formatGroupFooter(tools: ToolStatus[]): string | undefined {
+	if (tools.length < 2) {
 		return undefined;
 	}
-	const parts = countByAppearance(names).map((entry) => `${entry.count} ${entry.name}`);
-	return `${names.length} tools called: ${parts.join(", ")}`;
+	const order: string[] = [];
+	const byName = new Map<string, { total: number; failed: number }>();
+	for (const tool of tools) {
+		let entry = byName.get(tool.name);
+		if (!entry) {
+			entry = { total: 0, failed: 0 };
+			byName.set(tool.name, entry);
+			order.push(tool.name);
+		}
+		entry.total += 1;
+		if (tool.isError) {
+			entry.failed += 1;
+		}
+	}
+	const parts = order.map((name) => {
+		const entry = byName.get(name)!;
+		if (entry.failed === 0) {
+			return `${entry.total} ${name}`;
+		}
+		const ok = entry.total - entry.failed;
+		if (ok === 0) {
+			return `${entry.total} ${name} ✗`;
+		}
+		return `${entry.total} ${name} (${ok}✓ ${entry.failed}✗)`;
+	});
+	return `${tools.length} tools called: ${parts.join(", ")}`;
 }
 
 function skipAnsi(line: string, index: number): number {
