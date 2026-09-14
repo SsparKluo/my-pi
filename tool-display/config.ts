@@ -47,6 +47,8 @@ export interface ToolDisplayConfig {
 	diffSyntaxHighlight: boolean;
 	/** Left padding (spaces) applied to every line of a tool block. */
 	paddingX: number;
+	/** Collapse consecutive parallel tool calls into one block. */
+	groupParallel: boolean;
 	/** Per-tool opt-out. A tool stays on pi's built-in renderer when false. */
 	enabled: Record<ToolName, boolean>;
 }
@@ -59,6 +61,7 @@ export const DEFAULT_CONFIG: ToolDisplayConfig = {
 	diffColumnWidth: 100,
 	diffSyntaxHighlight: false,
 	paddingX: 1,
+	groupParallel: true,
 	enabled: {
 		read: true,
 		write: true,
@@ -185,6 +188,15 @@ export function loadConfigFromFile(configPath: string): LoadConfigResult {
 			config.paddingX = paddingX;
 		} else {
 			errors.push("paddingX must be a non-negative integer");
+		}
+	}
+
+	const groupParallel = raw.groupParallel;
+	if (groupParallel !== undefined) {
+		if (typeof groupParallel === "boolean") {
+			config.groupParallel = groupParallel;
+		} else {
+			errors.push("groupParallel must be a boolean");
 		}
 	}
 

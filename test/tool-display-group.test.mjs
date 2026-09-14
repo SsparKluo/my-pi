@@ -1,0 +1,98 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+	GROUP_BAR,
+	GROUP_CORNER,
+	TIMES,
+	countByAppearance,
+	formatGroupFooter,
+	joinCompactLine,
+	layoutGroup,
+	stripHangPad,
+	stripLeadingCallChrome,
+} from "../tool-display/group.ts";
+
+test("footer is omitted for a single tool", () => {
+	assert.equal(formatGroupFooter(["read"]), undefined);
+	assert.equal(formatGroupFooter([]), undefined);
+});
+
+test("footer counts types in appearance order with × and ASCII punctuation", () => {
+	assert.equal(
+		formatGroupFooter(["read", "read", "bash"]),
+		`3 tools called: 2 ${TIMES} read, 1 ${TIMES} bash`,
+	);
+	assert.equal(
+		formatGroupFooter(["bash", "read", "read"]),
+		`3 tools called: 1 ${TIMES} bash, 2 ${TIMES} read`,
+	);
+});
+
+test("countByAppearance keeps first-seen order", () => {
+	assert.deepEqual(countByAppearance(["grep", "read", "grep", "bash"]), [
+		{ name: "grep", count: 2 },
+		{ name: "read", count: 1 },
+		{ name: "bash", count: 1 },
+	]);
+});
+
+test("stripLeadingCallChrome drops pad and the status dot, keeping ANSI in the body", () => {
+	assert.equal(stripLeadingCallChrome(" ● read foo.ts"), "read foo.ts");
+	assert.equal(stripLeadingCallChrome("● read foo.ts"), "read foo.ts");
+	const colored = ` \x1b[32m●\x1b[0m \x1b[1mread\x1b[0m foo.ts`;
+	assert.equal(stripLeadingCallChrome(colored), "\x1b[1mread\x1b[0m foo.ts");
+});
+
+test("stripHangPad drops hang indent and leaves the summary", () => {
+	assert.equal(stripHangPad("   24 lines", 3), "24 lines");
+	assert.equal(stripHangPad("  24 lines", 2), "24 lines");
+	assert.equal(stripHangPad("\x1b[2m   24 lines", 3), "24 lines");
+});
+
+test("joinCompactLine inserts the separator only when both sides exist", () => {
+	assert.equal(joinCompactLine("read foo.ts", "24 lines", "·"), "read foo.ts · 24 lines");
+	assert.equal(joinCompactLine("read foo.ts", "", "·"), "read foo.ts");
+	assert.equal(joinCompactLine("read foo.ts", undefined, "·"), "read foo.ts");
+	assert.equal(joinCompactLine("", "24 lines", "·"), "24 lines");
+});
+
+test("layoutGroup draws ● / │ / └ at paddingX", () => {
+	const { lines, members, footerY } = layoutGroup({
+		paddingX: 1,
+		members: [["read foo.ts · 24 lines"], ["read bar.ts · 12 lines"], ["bash $ ls · 3 lines"]],
+		footer: `3 tools called: 2 ${TIMES} read, 1 ${TIMES} bash`,
+	});
+	assert.deepEqual(lines, [
+		" ● read foo.ts · 24 lines",
+		` ${GROUP_BAR} read bar.ts · 12 lines`,
+		` ${GROUP_BAR} bash $ ls · 3 lines`,
+		` ${GROUP_CORNER} 3 tools called: 2 ${TIMES} read, 1 ${TIMES} bash`,
+	]);
+	assert.deepEqual(members, [
+		{ y: 0, height: 1 },
+		{ y: 1, height: 1 },
+		{ y: 2, height: 1 },
+	]);
+	assert.equal(footerY, 3);
+});
+
+test("layoutGroup hangs wrapped member lines under the glyph", () => {
+	const { lines, members } = layoutGroup({
+		paddingX: 1,
+		members: [
+			["read very/long/path.ts ·", "24 lines"],
+			["grep /x/ in . · 3 matches"],
+		],
+		footer: `2 tools called: 1 ${TIMES} read, 1 ${TIMES} grep`,
+	});
+	assert.deepEqual(lines, [
+		" ● read very/long/path.ts ·",
+		"   24 lines",
+		` ${GROUP_BAR} grep /x/ in . · 3 matches`,
+		` ${GROUP_CORNER} 2 tools called: 1 ${TIMES} read, 1 ${TIMES} grep`,
+	]);
+	assert.deepEqual(members, [
+		{ y: 0, height: 2 },
+		{ y: 2, height: 1 },
+	]);
+});

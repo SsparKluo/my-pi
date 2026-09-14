@@ -17,10 +17,22 @@ import {
 	createReadTool,
 	createWriteTool,
 	ExtensionRunner,
+	ToolExecutionComponent,
 } from "@earendil-works/pi-coding-agent";
-import { Text, type Component } from "@earendil-works/pi-tui";
+import { Container, Text, type Component } from "@earendil-works/pi-tui";
 import { renderDiff } from "./diff.ts";
 import { ALL_TOOL_NAMES, loadConfig, type ToolDisplayConfig, type ToolName } from "./config.ts";
+import {
+	formatGroupFooter,
+	GROUP_BAR,
+	GROUP_CORNER,
+	isCompactSummary,
+	joinCompactLine,
+	layoutGroup,
+	stripHangPad,
+	stripLeadingCallChrome,
+	withCompactSummary,
+} from "./group.ts";
 import {
 	countFffFindResults,
 	countFffGrepMatches,
@@ -87,6 +99,8 @@ let toolResultPad = "   ";
 /** Pre-computed widths (avoid visibleWidth per render). */
 let toolBlockPadCols = 1;
 let toolResultPadCols = 3;
+let groupParallelEnabled = true;
+let lastTheme: Theme | undefined;
 
 function applyChromeConfig(config: ToolDisplayConfig): void {
 	const pad = Math.max(0, config.paddingX);
@@ -95,6 +109,7 @@ function applyChromeConfig(config: ToolDisplayConfig): void {
 	// Align under body text after the status marker: `{pad}● ` is pad + 2 cols.
 	toolResultPad = " ".repeat(pad + 2);
 	toolResultPadCols = pad + 2;
+	groupParallelEnabled = config.groupParallel;
 }
 
 function statusDot(theme: Theme, chrome: CallChrome = {}): string {
@@ -184,6 +199,7 @@ function padCallBlock(body: Component, theme: Theme, chrome: CallChrome = {}): C
 			if (cachedLines && cachedWidth === safeWidth) {
 				return cachedLines;
 			}
+			lastTheme = theme;
 			const indent = toolBlockPad;
 			const resultIndent = toolResultPad;
 			const dot = statusDot(theme, chrome);
@@ -244,7 +260,10 @@ function editorHint(description: string, theme: Theme): string {
 }
 
 function expandHint(theme: Theme): string {
-	return `(${editorHint("to expand", theme)})`;
+	if (isCompactSummary()) {
+		return "";
+	}
+	return ` (${editorHint("to expand", theme)})`;
 }
 
 function fullOutputHint(skippedLines: number, theme: Theme): string {
@@ -494,7 +513,7 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 				if (isErrorResult(result, resultText)) {
 					return padBlock(renderRawText(resultText, theme, true));
 				}
-				return empty();
+				return padBlock(text(theme.fg("muted", formatLineCount(countLines(resultText)))));
 			},
 		});
 	}
@@ -526,7 +545,7 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 				const content = typeof context.args?.content === "string" ? context.args.content : "";
 				const lineCount = countLines(content);
 				if (!expanded) {
-					const summary = `${theme.fg("muted", `wrote ${formatLineCount(lineCount)}`)} ${expandHint(theme)}`;
+					const summary = `${theme.fg("muted", `wrote ${formatLineCount(lineCount)}`)}${expandHint(theme)}`;
 					return padBlock(text(summary));
 				}
 				const display = content.length > 0 ? theme.fg("toolOutput", content) : theme.fg("muted", "(empty file)");
@@ -573,6 +592,19 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 			renderResult(result, { expanded, isPartial }, theme, context) {
 				const resultText = extractTextContent(result);
 				const isError = isErrorResult(result, resultText);
+				if (isCompactSummary()) {
+					if (isPartial) {
+						return padBlock(text(theme.fg("muted", "running...")));
+					}
+					if (isError) {
+						const first = resultText.trim().split("\n")[0] ?? "Error";
+						return padBlock(renderRawText(first, theme, true));
+					}
+					const split = splitTrailingNoticeBlock(resultText);
+					const body = (split.body.length > 0 ? split.body : resultText).trim();
+					const n = body.length > 0 ? countLines(body) : 0;
+					return padBlock(text(theme.fg("muted", formatLineCount(n))));
+				}
 				const command = typeof context.args?.command === "string" ? context.args.command : "";
 				const state = context.state as BashRenderState & {
 					viewKey?: string;
@@ -717,7 +749,7 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 						theme.fg("toolDiffRemoved", `-${stats.removals}`),
 						theme.fg("muted", `${stats.hunks} ${pluralize(stats.hunks, "hunk")}`),
 					].join(theme.fg("muted", " • "));
-					component = padBlock(text(`${summary} ${expandHint(theme)}`));
+					component = padBlock(text(`${summary}${expandHint(theme)}`));
 				} else {
 					component = padBlock(
 						renderDiff(
@@ -771,7 +803,7 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 					return padBlock(text(theme.fg("toolOutput", joinSections(body || resultText || theme.fg("muted", "(no matches)"), warningLine(notice, theme)))));
 				}
 				const count = countGrepMatches(resultText);
-				const summary = `${theme.fg("muted", `${count} ${pluralize(count, "match")}`)} ${expandHint(theme)}`;
+				const summary = `${theme.fg("muted", `${count} ${pluralize(count, "match")}`)}${expandHint(theme)}`;
 				return padBlock(text(joinSections(summary, warningLine(notice, theme))));
 			},
 		});
@@ -809,7 +841,7 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 					return padBlock(text(theme.fg("toolOutput", joinSections(body || resultText || theme.fg("muted", "(no files)"), warningLine(notice, theme)))));
 				}
 				const count = countFindResults(resultText);
-				const summary = `${theme.fg("muted", `${count} ${pluralize(count, "file")}`)} ${expandHint(theme)}`;
+				const summary = `${theme.fg("muted", `${count} ${pluralize(count, "file")}`)}${expandHint(theme)}`;
 				return padBlock(text(joinSections(summary, warningLine(notice, theme))));
 			},
 		});
@@ -846,7 +878,7 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 					return padBlock(text(theme.fg("toolOutput", joinSections(body || resultText || theme.fg("muted", "(empty directory)"), warningLine(notice, theme)))));
 				}
 				const count = countLsEntries(resultText);
-				const summary = `${theme.fg("muted", `${count} ${pluralize(count, "entry")}`)} ${expandHint(theme)}`;
+				const summary = `${theme.fg("muted", `${count} ${pluralize(count, "entry")}`)}${expandHint(theme)}`;
 				return padBlock(text(joinSections(summary, warningLine(notice, theme))));
 			},
 		});
@@ -912,7 +944,7 @@ function createFffGrepRenderers() {
 				return text(theme.fg("toolOutput", body || resultText || theme.fg("muted", "(no matches)")));
 			}
 			const count = totalMatchedFromDetails(result) ?? countFffGrepMatches(resultText);
-			const summary = `${theme.fg("muted", `${count} ${pluralize(count, "match")}`)} ${expandHint(theme)}`;
+			const summary = `${theme.fg("muted", `${count} ${pluralize(count, "match")}`)}${expandHint(theme)}`;
 			return text(summary);
 		},
 	};
@@ -950,7 +982,7 @@ function createFffFindRenderers() {
 				return text(theme.fg("toolOutput", body || resultText || theme.fg("muted", "(no files)")));
 			}
 			const count = totalMatchedFromDetails(result) ?? countFffFindResults(resultText);
-			const summary = `${theme.fg("muted", `${count} ${pluralize(count, "file")}`)} ${expandHint(theme)}`;
+			const summary = `${theme.fg("muted", `${count} ${pluralize(count, "file")}`)}${expandHint(theme)}`;
 			return text(summary);
 		},
 	};
@@ -1067,8 +1099,297 @@ function installToolShellPatch(): void {
 	proto[TOOL_SHELL_PATCH_FLAG] = true;
 }
 
+const TD_PARENT = Symbol.for("@ssparkluo/my-pi.tool-display.parent");
+const TD_GROUP = Symbol.for("@ssparkluo/my-pi.tool-display.group");
+const GROUP_PATCH_FLAG = Symbol.for("@ssparkluo/my-pi.tool-display.group-patch");
+
+type GroupMeta = {
+	run: ToolExecutionComponent[];
+	layout: ReturnType<typeof layoutGroup>;
+};
+
+type ToolComp = ToolExecutionComponent & {
+	[TD_PARENT]?: { children: unknown[] };
+	[TD_GROUP]?: GroupMeta;
+	toolName: string;
+	args: Record<string, unknown>;
+	expanded: boolean;
+	isPartial: boolean;
+	hideComponent: boolean;
+	result?: { content?: unknown; details?: unknown; isError?: boolean };
+	ui: { requestRender: () => void };
+	imageComponents: Array<{ render: (width: number) => string[] }>;
+	selfRenderHeight: number;
+	getCallRenderer: () => ((args: unknown, theme: Theme, ctx: unknown) => Component) | undefined;
+	getResultRenderer: () => ((result: unknown, opts: unknown, theme: Theme, ctx: unknown) => Component) | undefined;
+	getRenderContext: (last?: unknown) => unknown;
+	setExpanded: (value: boolean) => void;
+};
+
+function asTool(component: ToolExecutionComponent): ToolComp {
+	return component as unknown as ToolComp;
+}
+
+function isToolComponent(value: unknown): value is ToolExecutionComponent {
+	return value instanceof ToolExecutionComponent;
+}
+
+function toolRunFrom(parent: { children: unknown[] }, component: ToolExecutionComponent): ToolExecutionComponent[] {
+	const children = parent.children;
+	const index = children.indexOf(component);
+	if (index < 0) {
+		return [component];
+	}
+	let start = index;
+	while (start > 0 && isToolComponent(children[start - 1])) {
+		start -= 1;
+	}
+	let end = index;
+	while (end + 1 < children.length && isToolComponent(children[end + 1])) {
+		end += 1;
+	}
+	return children.slice(start, end + 1) as ToolExecutionComponent[];
+}
+
+function firstNonBlankLine(lines: string[]): string | undefined {
+	for (const line of lines) {
+		const { core, blank } = stripAndCheck(line);
+		if (!blank) {
+			return core;
+		}
+	}
+	return undefined;
+}
+
+function wrapBody(body: string, innerWidth: number): string[] {
+	const rendered = new Text(body, 0, 0).render(Math.max(innerWidth, 1));
+	const cores: string[] = [];
+	for (const line of rendered) {
+		const { core, blank } = stripAndCheck(line);
+		if (!blank) {
+			cores.push(core);
+		}
+	}
+	return cores.length > 0 ? cores : [""];
+}
+
+function compactBodyFor(component: ToolComp, theme: Theme, fullWidth: number): string {
+	return withCompactSummary(() => {
+		const context = component.getRenderContext(undefined);
+		const callRenderer = component.getCallRenderer();
+		let callBody = "";
+		if (callRenderer) {
+			const callLine = firstNonBlankLine(callRenderer(component.args, theme, context).render(fullWidth));
+			if (callLine) {
+				callBody = stripLeadingCallChrome(callLine);
+			}
+		}
+		let summary: string | undefined;
+		const resultRenderer = component.getResultRenderer();
+		if (resultRenderer && component.result) {
+			const resultLine = firstNonBlankLine(
+				resultRenderer(
+					{ content: component.result.content, details: component.result.details },
+					{ expanded: false, isPartial: component.isPartial },
+					theme,
+					context,
+				).render(fullWidth),
+			);
+			if (resultLine) {
+				const stripped = stripHangPad(resultLine, toolResultPadCols);
+				if (stripped) {
+					summary = stripped;
+				}
+			}
+		}
+		return joinCompactLine(callBody, summary, theme.fg("muted", "·"));
+	});
+}
+
+function expandedBodies(component: ToolComp, theme: Theme, fullWidth: number): string[] {
+	const resultRenderer = component.getResultRenderer();
+	if (!resultRenderer || !component.result) {
+		return [];
+	}
+	const context = component.getRenderContext(undefined);
+	const lines = resultRenderer(
+		{ content: component.result.content, details: component.result.details },
+		{ expanded: true, isPartial: component.isPartial },
+		theme,
+		context,
+	).render(fullWidth);
+	const bodies: string[] = [];
+	for (const line of lines) {
+		const { core, blank } = stripAndCheck(line);
+		if (blank) {
+			continue;
+		}
+		bodies.push(stripHangPad(core, toolResultPadCols));
+	}
+	return bodies;
+}
+
+function renderGroupedRun(run: ToolComp[], width: number, theme: Theme): string[] {
+	const inner = Math.max(width - toolBlockPadCols - 2, 1);
+	const members: string[][] = [];
+	const names: string[] = [];
+	for (const member of run) {
+		names.push(member.toolName);
+		const title = compactBodyFor(member, theme, width);
+		const titleWrapped = wrapBody(title, inner);
+		members.push(member.expanded ? [...titleWrapped, ...expandedBodies(member, theme, width)] : titleWrapped);
+	}
+	const footer = formatGroupFooter(names);
+	if (!footer) {
+		return [];
+	}
+	const first = run[0]!;
+	const layout = layoutGroup({
+		paddingX: toolBlockPadCols,
+		members,
+		footer: theme.fg("muted", footer),
+		firstGlyph: statusDot(theme, { isError: first.result?.isError, isPartial: first.isPartial }),
+		barGlyph: theme.fg("muted", GROUP_BAR),
+		cornerGlyph: theme.fg("muted", GROUP_CORNER),
+	});
+	first[TD_GROUP] = { run: run as unknown as ToolExecutionComponent[], layout };
+	first.selfRenderHeight = layout.lines.length;
+	return ["", ...layout.lines];
+}
+
+function renderOneLiner(component: ToolComp, width: number, theme: Theme): string[] {
+	delete component[TD_GROUP];
+	const inner = Math.max(width - toolBlockPadCols - 2, 1);
+	const wrapped = wrapBody(compactBodyFor(component, theme, width), inner);
+	const dot = statusDot(theme, { isError: component.result?.isError, isPartial: component.isPartial });
+	const lines = [""];
+	wrapped.forEach((core, index) => {
+		lines.push(index === 0 ? `${toolBlockPad}${dot} ${core}` : `${toolResultPad}${core}`);
+	});
+	component.selfRenderHeight = lines.length - 1;
+	return lines;
+}
+
+function installGroupPatch(): void {
+	const containerProto = Container.prototype as unknown as Record<string | symbol, unknown>;
+	if (containerProto[GROUP_PATCH_FLAG]) {
+		return;
+	}
+
+	const origAdd = Container.prototype.addChild;
+	Container.prototype.addChild = function patchedAddChild(component: Component) {
+		(component as unknown as ToolComp)[TD_PARENT] = this;
+		return origAdd.call(this, component);
+	};
+	const origRemove = Container.prototype.removeChild;
+	Container.prototype.removeChild = function patchedRemoveChild(component: Component) {
+		const child = component as unknown as ToolComp;
+		if (child[TD_PARENT] === this) {
+			delete child[TD_PARENT];
+		}
+		return origRemove.call(this, component);
+	};
+	const origClear = Container.prototype.clear;
+	Container.prototype.clear = function patchedClear() {
+		for (const child of this.children) {
+			const tool = child as unknown as ToolComp;
+			if (tool[TD_PARENT] === this) {
+				delete tool[TD_PARENT];
+			}
+		}
+		return origClear.call(this);
+	};
+
+	const origRender = ToolExecutionComponent.prototype.render;
+	ToolExecutionComponent.prototype.render = function patchedToolRender(width: number) {
+		const component = asTool(this);
+		if (component.hideComponent) {
+			return [];
+		}
+		if (!groupParallelEnabled) {
+			delete component[TD_GROUP];
+			return origRender.call(this, width);
+		}
+		const theme = lastTheme;
+		const parent = component[TD_PARENT];
+		if (theme && parent) {
+			const run = toolRunFrom(parent, this).map(asTool);
+			const grouped = run.length >= 2 && !run.every((member) => member.expanded);
+			if (grouped) {
+				if (run[0] !== component) {
+					delete component[TD_GROUP];
+					return [];
+				}
+				return renderGroupedRun(run, width, theme);
+			}
+		}
+		if (theme && !component.expanded) {
+			return renderOneLiner(component, width, theme);
+		}
+		delete component[TD_GROUP];
+		return origRender.call(this, width);
+	};
+
+	const origMouse = ToolExecutionComponent.prototype.handleMouse;
+	ToolExecutionComponent.prototype.handleMouse = function patchedToolMouse(event: {
+		y: number;
+		type?: string;
+		button?: string;
+	}) {
+		const component = asTool(this);
+		if (!groupParallelEnabled) {
+			return origMouse.call(this, event);
+		}
+		const group = component[TD_GROUP];
+		if (!group) {
+			if (component.expanded) {
+				return origMouse.call(this, event);
+			}
+			if (event.y <= 0 || event.y > component.selfRenderHeight) {
+				return undefined;
+			}
+			if (event.type === "click" && event.button === "left" && component.result) {
+				component.setExpanded(true);
+				component.ui.requestRender();
+			}
+			return { handled: true };
+		}
+		if (event.y <= 0) {
+			return undefined;
+		}
+		const y = event.y - 1;
+		const click = event.type === "click" && event.button === "left";
+		if (y === group.layout.footerY) {
+			if (click) {
+				for (const member of group.run) {
+					asTool(member).setExpanded(true);
+				}
+				component.ui.requestRender();
+			}
+			return { handled: true };
+		}
+		for (let i = 0; i < group.layout.members.length; i++) {
+			const region = group.layout.members[i]!;
+			if (y >= region.y && y < region.y + region.height) {
+				if (click) {
+					const member = asTool(group.run[i]!);
+					if (member.result) {
+						member.setExpanded(!member.expanded);
+						component.ui.requestRender();
+					}
+				}
+				return { handled: true };
+			}
+		}
+		return undefined;
+	};
+
+	containerProto[GROUP_PATCH_FLAG] = true;
+}
+
 // Install early so the first registry build picks up shell + FFF overrides.
 installToolShellPatch();
+installGroupPatch();
 
 function applyConfigAndRegister(pi: ExtensionAPI, cwd: string, restoreActiveTools: boolean): void {
 	const { config, errors } = loadConfig();

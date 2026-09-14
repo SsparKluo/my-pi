@@ -125,7 +125,16 @@ Footer line 1/2 also surface other extensions' `ctx.ui.setStatus` values:
 
 ## tool-display — tool call/result chrome
 
-**What it does.** Overrides rendering for `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, `ffgrep`, `fffind`. Adaptive edit diffs, fuller bash expand, muted chrome. When `pi-rtk-optimizer` rewrites a Bash command, the final timing line appends `· rtk rewritten`. Does **not** touch user-message rendering.
+**What it does.** Overrides rendering for `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, `ffgrep`, `fffind`. Adaptive edit diffs, fuller bash expand, muted chrome. Collapsed calls are one line (`● read foo.ts · 24 lines`). Consecutive parallel calls from the same assistant message collapse into one block:
+
+```
+ ● read foo.ts · 24 lines
+ │ read bar.ts · 12 lines
+ │ bash $ ls · 3 lines
+ └ 3 tools called: 2 × read, 1 × bash
+```
+
+Click a member line to expand just that call; click the `└` footer or Ctrl+O to expand the whole batch (splits back into independent blocks). When `pi-rtk-optimizer` rewrites a Bash command, the final timing line appends `· rtk rewritten`. Does **not** touch user-message rendering.
 
 ### Config: `~/.pi/agent/tool-display.json`
 
@@ -140,6 +149,7 @@ Global only — no project-level file. All keys optional; invalid fields fall ba
   "diffColumnWidth": 100,
   "diffSyntaxHighlight": false,
   "paddingX": 1,
+  "groupParallel": true,
   "enabled": {
     "read": true,
     "write": true,
@@ -163,6 +173,7 @@ Global only — no project-level file. All keys optional; invalid fields fall ba
 | `diffColumnWidth` | `100` | Width at which `"auto"` switches to side-by-side |
 | `diffSyntaxHighlight` | `false` | Highlight diff context via pi's built-in `highlightCode` |
 | `paddingX` | `1` | Left padding (spaces) on every tool-block line |
+| `groupParallel` | `true` | `false` = do not collapse parallel calls (old two-line blocks) |
 | `enabled.<tool>` | `true` | `false` = keep pi's built-in renderer for that tool |
 
 ---
