@@ -9,6 +9,7 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
+	AssistantMessageComponent,
 	createBashTool,
 	createEditTool,
 	createFindTool,
@@ -1132,6 +1133,16 @@ function isToolComponent(value: unknown): value is ToolExecutionComponent {
 	return value instanceof ToolExecutionComponent;
 }
 
+// Tool-call-only assistant messages render zero lines; step over them so
+// consecutive tool rounds fold into one block. O(1): no render call.
+function isInvisibleAssistant(value: unknown): boolean {
+	if (!(value instanceof AssistantMessageComponent)) {
+		return false;
+	}
+	const container = (value as unknown as { contentContainer?: { children: unknown[] } }).contentContainer;
+	return !container || container.children.length === 0;
+}
+
 function toolRunFrom(parent: { children: unknown[] }, component: ToolExecutionComponent): ToolExecutionComponent[] {
 	const children = parent.children;
 	const index = children.indexOf(component);
@@ -1139,14 +1150,21 @@ function toolRunFrom(parent: { children: unknown[] }, component: ToolExecutionCo
 		return [component];
 	}
 	let start = index;
-	while (start > 0 && isToolComponent(children[start - 1])) {
+	while (start > 0 && (isToolComponent(children[start - 1]) || isInvisibleAssistant(children[start - 1]))) {
 		start -= 1;
 	}
 	let end = index;
-	while (end + 1 < children.length && isToolComponent(children[end + 1])) {
+	while (end + 1 < children.length && (isToolComponent(children[end + 1]) || isInvisibleAssistant(children[end + 1]))) {
 		end += 1;
 	}
-	return children.slice(start, end + 1) as ToolExecutionComponent[];
+	const run: ToolExecutionComponent[] = [];
+	for (let i = start; i <= end; i++) {
+		const child = children[i]!;
+		if (isToolComponent(child)) {
+			run.push(child);
+		}
+	}
+	return run;
 }
 
 function firstNonBlankLine(lines: string[]): string | undefined {

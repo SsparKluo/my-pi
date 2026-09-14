@@ -125,7 +125,7 @@ Footer line 1/2 also surface other extensions' `ctx.ui.setStatus` values:
 
 ## tool-display — tool call/result chrome
 
-**What it does.** Overrides rendering for `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, `ffgrep`, `fffind`. Adaptive edit diffs, fuller bash expand, muted chrome. Collapsed calls are one line (`● read foo.ts · 24 lines`). Consecutive parallel calls from the same assistant message collapse into one block:
+**What it does.** Overrides rendering for `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, `ffgrep`, `fffind`. Adaptive edit diffs, fuller bash expand, muted chrome. Collapsed calls are one line (`● read foo.ts · 24 lines`). Consecutive tool calls — one parallel batch or several back-to-back rounds with no assistant text in between — collapse into one block:
 
 ```
  ● read foo.ts · 24 lines
@@ -173,7 +173,7 @@ Global only — no project-level file. All keys optional; invalid fields fall ba
 | `diffColumnWidth` | `100` | Width at which `"auto"` switches to side-by-side |
 | `diffSyntaxHighlight` | `false` | Highlight diff context via pi's built-in `highlightCode` |
 | `paddingX` | `1` | Left padding (spaces) on every tool-block line |
-| `groupParallel` | `true` | `false` = do not collapse parallel calls (old two-line blocks) |
+| `groupParallel` | `true` | `false` = do not collapse consecutive tool calls (old two-line blocks) |
 | `enabled.<tool>` | `true` | `false` = keep pi's built-in renderer for that tool |
 
 ---
