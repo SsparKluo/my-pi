@@ -76,23 +76,24 @@ test("layoutGroup draws ● / │ / └ at paddingX", () => {
 	assert.equal(footerY, 3);
 });
 
-test("layoutGroup hangs wrapped member lines under the glyph", () => {
+test("layoutGroup keeps │ on wrapped member lines so the bar does not break", () => {
 	const { lines, members } = layoutGroup({
 		paddingX: 1,
 		members: [
 			["read very/long/path.ts ·", "24 lines"],
-			["grep /x/ in . · 3 matches"],
+			["bash $ git add lots of files · 15", "lines"],
 		],
-		footer: `2 tools called: 1 ${TIMES} read, 1 ${TIMES} grep`,
+		footer: `2 tools called: 1 ${TIMES} read, 1 ${TIMES} bash`,
 	});
 	assert.deepEqual(lines, [
 		" ● read very/long/path.ts ·",
-		"   24 lines",
-		` ${GROUP_BAR} grep /x/ in . · 3 matches`,
-		` ${GROUP_CORNER} 2 tools called: 1 ${TIMES} read, 1 ${TIMES} grep`,
+		` ${GROUP_BAR} 24 lines`,
+		` ${GROUP_BAR} bash $ git add lots of files · 15`,
+		` ${GROUP_BAR} lines`,
+		` ${GROUP_CORNER} 2 tools called: 1 ${TIMES} read, 1 ${TIMES} bash`,
 	]);
 	assert.deepEqual(members, [
 		{ y: 0, height: 2 },
-		{ y: 2, height: 1 },
+		{ y: 2, height: 2 },
 	]);
 });

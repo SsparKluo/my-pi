@@ -126,7 +126,7 @@ export type GroupLayout = {
  *   {pad}● {first}
  *   {pad}│ {rest…}
  *   {pad}└ {footer}
- * Wrapped body lines hang at pad+2 with no extra glyph.
+ * Wrapped body lines keep │ so the vertical bar does not break.
  */
 let compactSummaryMode = false;
 
@@ -152,7 +152,6 @@ export function layoutGroup(options: {
 	cornerGlyph?: string;
 }): GroupLayout {
 	const pad = " ".repeat(Math.max(0, options.paddingX));
-	const hang = " ".repeat(Math.max(0, options.paddingX) + 2);
 	const firstGlyph = options.firstGlyph ?? "●";
 	const barGlyph = options.barGlyph ?? GROUP_BAR;
 	const cornerGlyph = options.cornerGlyph ?? GROUP_CORNER;
@@ -161,16 +160,17 @@ export function layoutGroup(options: {
 
 	for (let i = 0; i < options.members.length; i++) {
 		const wrapped = options.members[i] ?? [];
-		const glyph = i === 0 ? firstGlyph : barGlyph;
 		const y = lines.length;
 		if (wrapped.length === 0) {
+			const glyph = i === 0 ? firstGlyph : barGlyph;
 			lines.push(`${pad}${glyph}`);
 			members.push({ y, height: 1 });
 			continue;
 		}
 		for (let row = 0; row < wrapped.length; row++) {
 			const body = wrapped[row] ?? "";
-			lines.push(row === 0 ? `${pad}${glyph} ${body}` : `${hang}${body}`);
+			const glyph = i === 0 && row === 0 ? firstGlyph : barGlyph;
+			lines.push(body.length > 0 ? `${pad}${glyph} ${body}` : `${pad}${glyph}`);
 		}
 		members.push({ y, height: Math.max(wrapped.length, 1) });
 	}
