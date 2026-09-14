@@ -27,9 +27,11 @@ import {
 	formatGroupFooter,
 	GROUP_BAR,
 	GROUP_CORNER,
+	GROUP_TOP,
 	isCompactSummary,
 	joinCompactLine,
 	layoutGroup,
+	SOLO_GLYPH,
 	stripHangPad,
 	stripLeadingCallChrome,
 	withCompactSummary,
@@ -1202,7 +1204,9 @@ function compactBodyFor(component: ToolComp, theme: Theme, fullWidth: number): s
 		}
 		let summary: string | undefined;
 		const resultRenderer = component.getResultRenderer();
-		if (resultRenderer && component.result) {
+		// Collapsed lines show failure via the red dot only; error text appears
+		// when the member is expanded.
+		if (resultRenderer && component.result && !component.result.isError) {
 			const resultLine = firstNonBlankLine(
 				resultRenderer(
 					{ content: component.result.content, details: component.result.details },
@@ -1223,7 +1227,7 @@ function compactBodyFor(component: ToolComp, theme: Theme, fullWidth: number): s
 }
 
 function getCompact(component: ToolComp, theme: Theme, fullWidth: number): CompactCache {
-	const inner = Math.max(fullWidth - toolBlockPadCols - 2, 1);
+	const inner = Math.max(fullWidth - toolBlockPadCols - 4, 1);
 	const cache = component[TD_COMPACT];
 	if (
 		cache &&
@@ -1277,12 +1281,13 @@ function expandedBodies(component: ToolComp, theme: Theme, fullWidth: number): s
 }
 
 function renderGroupedRun(run: ToolComp[], width: number, theme: Theme): string[] {
-	const members: string[][] = [];
+	const members: Array<{ dot: string; wrapped: string[] }> = [];
 	const names: string[] = [];
 	for (const member of run) {
 		names.push(member.toolName);
 		const titleWrapped = getCompact(member, theme, width).wrapped;
-		members.push(member.expanded ? [...titleWrapped, ...expandedBodies(member, theme, width)] : titleWrapped);
+		const dot = statusDot(theme, { isError: member.result?.isError, isPartial: member.isPartial });
+		members.push(member.expanded ? { dot, wrapped: [...titleWrapped, ...expandedBodies(member, theme, width)] } : { dot, wrapped: titleWrapped });
 	}
 	const footer = formatGroupFooter(names);
 	if (!footer) {
@@ -1293,7 +1298,7 @@ function renderGroupedRun(run: ToolComp[], width: number, theme: Theme): string[
 		paddingX: toolBlockPadCols,
 		members,
 		footer: theme.fg("muted", footer),
-		firstGlyph: statusDot(theme, { isError: first.result?.isError, isPartial: first.isPartial }),
+		firstGlyph: theme.fg("muted", GROUP_TOP),
 		barGlyph: theme.fg("muted", GROUP_BAR),
 		cornerGlyph: theme.fg("muted", GROUP_CORNER),
 	});
@@ -1306,9 +1311,10 @@ function renderOneLiner(component: ToolComp, width: number, theme: Theme): strin
 	delete component[TD_GROUP];
 	const wrapped = getCompact(component, theme, width).wrapped;
 	const dot = statusDot(theme, { isError: component.result?.isError, isPartial: component.isPartial });
+	const contPad = " ".repeat(toolBlockPadCols + 4);
 	const lines = [""];
 	wrapped.forEach((core, index) => {
-		lines.push(index === 0 ? `${toolBlockPad}${dot} ${core}` : `${toolResultPad}${core}`);
+		lines.push(index === 0 ? `${toolBlockPad}${theme.fg("muted", SOLO_GLYPH)} ${dot} ${core}` : `${contPad}${core}`);
 	});
 	component.selfRenderHeight = lines.length - 1;
 	return lines;

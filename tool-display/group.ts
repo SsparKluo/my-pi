@@ -1,6 +1,9 @@
 /** Box-drawing chrome for a collapsed parallel tool group. */
+export const GROUP_TOP = "┌";
 export const GROUP_BAR = "│";
 export const GROUP_CORNER = "└";
+/** Rail glyph for a solo (ungrouped) collapsed tool. */
+export const SOLO_GLYPH = "-";
 
 export type ToolCount = {
 	name: string;
@@ -120,13 +123,6 @@ export type GroupLayout = {
 	footerY: number;
 };
 
-/**
- * Lay out a collapsed group:
- *   {pad}● {first}
- *   {pad}│ {rest…}
- *   {pad}└ {footer}
- * Wrapped body lines keep │ so the vertical bar does not break.
- */
 let compactSummaryMode = false;
 
 export function isCompactSummary(): boolean {
@@ -142,34 +138,41 @@ export function withCompactSummary<T>(fn: () => T): T {
 	}
 }
 
+/**
+ * Lay out a collapsed group:
+ *   {pad}┌ ● {first}
+ *   {pad}│ ● {rest…}
+ *   {pad}└ {footer}
+ * Each member row carries its own status dot; wrapped body lines keep │
+ * so the vertical bar does not break, aligned under the body column.
+ */
 export function layoutGroup(options: {
 	paddingX: number;
-	members: string[][];
+	members: Array<{ dot: string; wrapped: string[] }>;
 	footer: string;
 	firstGlyph?: string;
 	barGlyph?: string;
 	cornerGlyph?: string;
 }): GroupLayout {
 	const pad = " ".repeat(Math.max(0, options.paddingX));
-	const firstGlyph = options.firstGlyph ?? "●";
+	const firstGlyph = options.firstGlyph ?? GROUP_TOP;
 	const barGlyph = options.barGlyph ?? GROUP_BAR;
 	const cornerGlyph = options.cornerGlyph ?? GROUP_CORNER;
 	const lines: string[] = [];
 	const members: GroupMemberLayout[] = [];
 
 	for (let i = 0; i < options.members.length; i++) {
-		const wrapped = options.members[i] ?? [];
+		const member = options.members[i] ?? { dot: "", wrapped: [] };
+		const wrapped = member.wrapped.length > 0 ? member.wrapped : [""];
 		const y = lines.length;
-		if (wrapped.length === 0) {
-			const glyph = i === 0 ? firstGlyph : barGlyph;
-			lines.push(`${pad}${glyph}`);
-			members.push({ y, height: 1 });
-			continue;
-		}
 		for (let row = 0; row < wrapped.length; row++) {
 			const body = wrapped[row] ?? "";
-			const glyph = i === 0 && row === 0 ? firstGlyph : barGlyph;
-			lines.push(body.length > 0 ? `${pad}${glyph} ${body}` : `${pad}${glyph}`);
+			if (row === 0) {
+				const glyph = i === 0 ? firstGlyph : barGlyph;
+				lines.push(body.length > 0 ? `${pad}${glyph} ${member.dot} ${body}` : `${pad}${glyph} ${member.dot}`);
+			} else {
+				lines.push(body.length > 0 ? `${pad}${barGlyph}   ${body}` : `${pad}${barGlyph}`);
+			}
 		}
 		members.push({ y, height: Math.max(wrapped.length, 1) });
 	}

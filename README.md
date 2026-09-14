@@ -125,12 +125,13 @@ Footer line 1/2 also surface other extensions' `ctx.ui.setStatus` values:
 
 ## tool-display — tool call/result chrome
 
-**What it does.** Overrides rendering for `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, `ffgrep`, `fffind`. Adaptive edit diffs, fuller bash expand, muted chrome. Collapsed calls are one line (`● read foo.ts · 24 lines`). Consecutive tool calls — one parallel batch or several back-to-back rounds with no assistant text in between — collapse into one block:
+**What it does.** Overrides rendering for `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, `ffgrep`, `fffind`. Adaptive edit diffs, fuller bash expand, muted chrome. Collapsed calls are one line (`- ● read foo.ts · 24 lines`; the dot is red on failure, error text appears on expand). Consecutive tool calls — one parallel batch or several back-to-back rounds with no assistant text in between — collapse into one block, each member keeping its own status dot:
 
 ```
- ● read foo.ts · 24 lines
- │ read bar.ts · 12 lines
- │ bash $ ls · 3 lines
+ - ● read foo.ts · 24 lines
+ ┌ ● read foo.ts · 24 lines
+ │ ● read bar.ts · 12 lines
+ │ ● bash $ ls · 3 lines
  └ 3 tools called: 2 read, 1 bash
 ```
 

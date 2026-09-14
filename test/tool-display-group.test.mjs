@@ -3,6 +3,8 @@ import test from "node:test";
 import {
 	GROUP_BAR,
 	GROUP_CORNER,
+	GROUP_TOP,
+	SOLO_GLYPH,
 	countByAppearance,
 	formatGroupFooter,
 	joinCompactLine,
@@ -49,16 +51,20 @@ test("joinCompactLine inserts the separator only when both sides exist", () => {
 	assert.equal(joinCompactLine("", "24 lines", "·"), "24 lines");
 });
 
-test("layoutGroup draws ● / │ / └ at paddingX", () => {
+test("layoutGroup draws ┌ ● / │ ● / └ with per-member dots", () => {
 	const { lines, members, footerY } = layoutGroup({
 		paddingX: 1,
-		members: [["read foo.ts · 24 lines"], ["read bar.ts · 12 lines"], ["bash $ ls · 3 lines"]],
+		members: [
+			{ dot: "\x1b[36m●\x1b[0m", wrapped: ["read foo.ts · 24 lines"] },
+			{ dot: "\x1b[36m●\x1b[0m", wrapped: ["read bar.ts · 12 lines"] },
+			{ dot: "\x1b[31m●\x1b[0m", wrapped: ["bash $ ls · 3 lines"] },
+		],
 		footer: "3 tools called: 2 read, 1 bash",
 	});
 	assert.deepEqual(lines, [
-		" ● read foo.ts · 24 lines",
-		` ${GROUP_BAR} read bar.ts · 12 lines`,
-		` ${GROUP_BAR} bash $ ls · 3 lines`,
+		` ${GROUP_TOP} \x1b[36m●\x1b[0m read foo.ts · 24 lines`,
+		` ${GROUP_BAR} \x1b[36m●\x1b[0m read bar.ts · 12 lines`,
+		` ${GROUP_BAR} \x1b[31m●\x1b[0m bash $ ls · 3 lines`,
 		` ${GROUP_CORNER} 3 tools called: 2 read, 1 bash`,
 	]);
 	assert.deepEqual(members, [
@@ -67,22 +73,23 @@ test("layoutGroup draws ● / │ / └ at paddingX", () => {
 		{ y: 2, height: 1 },
 	]);
 	assert.equal(footerY, 3);
+	assert.equal(SOLO_GLYPH, "-");
 });
 
 test("layoutGroup keeps │ on wrapped member lines so the bar does not break", () => {
 	const { lines, members } = layoutGroup({
 		paddingX: 1,
 		members: [
-			["read very/long/path.ts ·", "24 lines"],
-			["bash $ git add lots of files · 15", "lines"],
+			{ dot: "●", wrapped: ["read very/long/path.ts ·", "24 lines"] },
+			{ dot: "●", wrapped: ["bash $ git add lots of files · 15", "lines"] },
 		],
 		footer: "2 tools called: 1 read, 1 bash",
 	});
 	assert.deepEqual(lines, [
-		" ● read very/long/path.ts ·",
-		` ${GROUP_BAR} 24 lines`,
-		` ${GROUP_BAR} bash $ git add lots of files · 15`,
-		` ${GROUP_BAR} lines`,
+		` ${GROUP_TOP} ● read very/long/path.ts ·`,
+		` ${GROUP_BAR}   24 lines`,
+		` ${GROUP_BAR} ● bash $ git add lots of files · 15`,
+		` ${GROUP_BAR}   lines`,
 		` ${GROUP_CORNER} 2 tools called: 1 read, 1 bash`,
 	]);
 	assert.deepEqual(members, [
