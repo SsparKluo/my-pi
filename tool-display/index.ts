@@ -446,10 +446,14 @@ type ToolPromptMetadata = {
 };
 
 function getToolPromptMetadata(pi: ExtensionAPI, toolName: string): ToolPromptMetadata {
-	const tool = pi.getAllTools().find((candidate) => candidate.name === toolName);
 	const meta: ToolPromptMetadata = {};
-	if (tool?.promptGuidelines) {
-		meta.promptGuidelines = [...tool.promptGuidelines];
+	try {
+		const tool = pi.getAllTools().find((candidate) => candidate.name === toolName);
+		if (tool?.promptGuidelines) {
+			meta.promptGuidelines = [...tool.promptGuidelines];
+		}
+	} catch {
+		// Unbound factory: getAllTools is not initialized.
 	}
 	return meta;
 }
@@ -1066,7 +1070,24 @@ function installToolShellPatch(): void {
 // Install early so the first registry build picks up shell + FFF overrides.
 installToolShellPatch();
 
+function applyConfigAndRegister(pi: ExtensionAPI, cwd: string, restoreActiveTools: boolean): void {
+	const { config, errors } = loadConfig();
+	if (errors.length > 0) {
+		console.error(`[tool-display] config errors:\n${errors.map((e) => `  - ${e}`).join("\n")}`);
+	}
+	fffDisplayConfig = config;
+	applyChromeConfig(config);
+	const activeTools = restoreActiveTools ? pi.getActiveTools() : undefined;
+	registerOverrides(pi, cwd, config);
+	if (activeTools) {
+		pi.setActiveTools(activeTools);
+	}
+}
+
 export default function (pi: ExtensionAPI) {
+	// registerTool during load so the first registry build (before session_start) includes compact renderers.
+	applyConfigAndRegister(pi, process.cwd(), false);
+
 	pi.on("tool_execution_start", (event) => {
 		if (event.toolName !== "bash") {
 			return;
@@ -1090,16 +1111,6 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("session_start", (_event, ctx) => {
-		const { config, errors } = loadConfig();
-		if (errors.length > 0) {
-			// Surface config problems without blocking startup; invalid fields fall back to defaults.
-			console.error(`[tool-display] config errors:\n${errors.map((e) => `  - ${e}`).join("\n")}`);
-		}
-		fffDisplayConfig = config;
-		applyChromeConfig(config);
-		const activeTools = pi.getActiveTools();
-		registerOverrides(pi, ctx.cwd, config);
-		// registerOverrides triggers refreshTools, which re-runs the shell/FFF patch with live config.
-		pi.setActiveTools(activeTools);
+		applyConfigAndRegister(pi, ctx.cwd, true);
 	});
 }
