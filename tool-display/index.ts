@@ -1085,6 +1085,7 @@ function installToolShellPatch(): void {
 
 const TD_PARENT = Symbol.for("@ssparkluo/my-pi.tool-display.parent");
 const TD_GROUP = Symbol.for("@ssparkluo/my-pi.tool-display.group");
+const TD_COMPACT = Symbol.for("@ssparkluo/my-pi.tool-display.compact");
 const GROUP_PATCH_FLAG = Symbol.for("@ssparkluo/my-pi.tool-display.group-patch");
 
 type GroupMeta = {
@@ -1092,9 +1093,22 @@ type GroupMeta = {
 	layout: ReturnType<typeof layoutGroup>;
 };
 
+type CompactCache = {
+	width: number;
+	inner: number;
+	result: unknown;
+	args: unknown;
+	isPartial: boolean;
+	isError: boolean | undefined;
+	pad: number;
+	line: string;
+	wrapped: string[];
+};
+
 type ToolComp = ToolExecutionComponent & {
 	[TD_PARENT]?: { children: unknown[] };
 	[TD_GROUP]?: GroupMeta;
+	[TD_COMPACT]?: CompactCache;
 	toolName: string;
 	args: Record<string, unknown>;
 	expanded: boolean;
@@ -1190,6 +1204,37 @@ function compactBodyFor(component: ToolComp, theme: Theme, fullWidth: number): s
 	});
 }
 
+function getCompact(component: ToolComp, theme: Theme, fullWidth: number): CompactCache {
+	const inner = Math.max(fullWidth - toolBlockPadCols - 2, 1);
+	const cache = component[TD_COMPACT];
+	if (
+		cache &&
+		cache.width === fullWidth &&
+		cache.inner === inner &&
+		cache.result === component.result &&
+		cache.args === component.args &&
+		cache.isPartial === component.isPartial &&
+		cache.isError === component.result?.isError &&
+		cache.pad === toolResultPadCols
+	) {
+		return cache;
+	}
+	const line = compactBodyFor(component, theme, fullWidth);
+	const next: CompactCache = {
+		width: fullWidth,
+		inner,
+		result: component.result,
+		args: component.args,
+		isPartial: component.isPartial,
+		isError: component.result?.isError,
+		pad: toolResultPadCols,
+		line,
+		wrapped: wrapBody(line, inner),
+	};
+	component[TD_COMPACT] = next;
+	return next;
+}
+
 function expandedBodies(component: ToolComp, theme: Theme, fullWidth: number): string[] {
 	const resultRenderer = component.getResultRenderer();
 	if (!resultRenderer || !component.result) {
@@ -1214,13 +1259,11 @@ function expandedBodies(component: ToolComp, theme: Theme, fullWidth: number): s
 }
 
 function renderGroupedRun(run: ToolComp[], width: number, theme: Theme): string[] {
-	const inner = Math.max(width - toolBlockPadCols - 2, 1);
 	const members: string[][] = [];
 	const names: string[] = [];
 	for (const member of run) {
 		names.push(member.toolName);
-		const title = compactBodyFor(member, theme, width);
-		const titleWrapped = wrapBody(title, inner);
+		const titleWrapped = getCompact(member, theme, width).wrapped;
 		members.push(member.expanded ? [...titleWrapped, ...expandedBodies(member, theme, width)] : titleWrapped);
 	}
 	const footer = formatGroupFooter(names);
@@ -1243,8 +1286,7 @@ function renderGroupedRun(run: ToolComp[], width: number, theme: Theme): string[
 
 function renderOneLiner(component: ToolComp, width: number, theme: Theme): string[] {
 	delete component[TD_GROUP];
-	const inner = Math.max(width - toolBlockPadCols - 2, 1);
-	const wrapped = wrapBody(compactBodyFor(component, theme, width), inner);
+	const wrapped = getCompact(component, theme, width).wrapped;
 	const dot = statusDot(theme, { isError: component.result?.isError, isPartial: component.isPartial });
 	const lines = [""];
 	wrapped.forEach((core, index) => {
