@@ -1341,43 +1341,42 @@ function installGroupPatch(): void {
 			return origMouse.call(this, event);
 		}
 		const group = component[TD_GROUP];
+		const click = event.type === "click" && event.button === "left";
+		// Wheel/move/press must return undefined so the TUI still routes the wheel to ScrollView.
+		if (!click) {
+			return group || !component.expanded ? undefined : origMouse.call(this, event);
+		}
 		if (!group) {
 			if (component.expanded) {
 				return origMouse.call(this, event);
 			}
-			if (event.y <= 0 || event.y > component.selfRenderHeight) {
+			if (event.y <= 0 || event.y > component.selfRenderHeight || !component.result) {
 				return undefined;
 			}
-			if (event.type === "click" && event.button === "left" && component.result) {
-				component.setExpanded(true);
-				component.ui.requestRender();
-			}
+			component.setExpanded(true);
+			component.ui.requestRender();
 			return { handled: true };
 		}
 		if (event.y <= 0) {
 			return undefined;
 		}
 		const y = event.y - 1;
-		const click = event.type === "click" && event.button === "left";
 		if (y === group.layout.footerY) {
-			if (click) {
-				for (const member of group.run) {
-					asTool(member).setExpanded(true);
-				}
-				component.ui.requestRender();
+			for (const member of group.run) {
+				asTool(member).setExpanded(true);
 			}
+			component.ui.requestRender();
 			return { handled: true };
 		}
 		for (let i = 0; i < group.layout.members.length; i++) {
 			const region = group.layout.members[i]!;
 			if (y >= region.y && y < region.y + region.height) {
-				if (click) {
-					const member = asTool(group.run[i]!);
-					if (member.result) {
-						member.setExpanded(!member.expanded);
-						component.ui.requestRender();
-					}
+				const member = asTool(group.run[i]!);
+				if (!member.result) {
+					return undefined;
 				}
+				member.setExpanded(!member.expanded);
+				component.ui.requestRender();
 				return { handled: true };
 			}
 		}
