@@ -255,21 +255,6 @@ function formatLineCount(count: number): string {
 	return `${count} ${pluralize(count, "line")}`;
 }
 
-function editorHint(description: string, theme: Theme): string {
-	return `${theme.fg("dim", "ctrl+o")}${theme.fg("muted", ` ${description}`)}`;
-}
-
-function expandHint(theme: Theme): string {
-	if (isCompactSummary()) {
-		return "";
-	}
-	return ` (${editorHint("to expand", theme)})`;
-}
-
-function fullOutputHint(skippedLines: number, theme: Theme): string {
-	return `${theme.fg("muted", `... (${skippedLines} earlier ${pluralize(skippedLines, "visual line")}). Press `)}${theme.fg("dim", "ctrl+o")}${theme.fg("muted", " to see the full output.")}`;
-}
-
 function warningLine(notice: string | undefined, theme: Theme): string | undefined {
 	return notice ? theme.fg("dim", notice) : undefined;
 }
@@ -286,7 +271,7 @@ function renderRawText(value: string, theme: Theme, isError: boolean): Component
 function styledTiming(timingPlain: string, theme: Theme, truncated: boolean, skippedLines: number): string {
 	let line = theme.fg("muted", timingPlain);
 	if (truncated) {
-		line += ` ${theme.fg("muted", "·")} ${theme.fg("muted", `${skippedLines} earlier`)} ${theme.fg("muted", "·")} ${editorHint("to expand", theme)}`;
+		line += ` ${theme.fg("muted", "·")} ${theme.fg("muted", `${skippedLines} earlier`)}`;
 	}
 	return line;
 }
@@ -545,7 +530,7 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 				const content = typeof context.args?.content === "string" ? context.args.content : "";
 				const lineCount = countLines(content);
 				if (!expanded) {
-					const summary = `${theme.fg("muted", `wrote ${formatLineCount(lineCount)}`)}${expandHint(theme)}`;
+					const summary = theme.fg("muted", `wrote ${formatLineCount(lineCount)}`);
 					return padBlock(text(summary));
 				}
 				const display = content.length > 0 ? theme.fg("toolOutput", content) : theme.fg("muted", "(empty file)");
@@ -584,7 +569,7 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 				const bodyLines = [head, ...rest.map((line) => theme.fg("accent", line))];
 				if (hidden > 0) {
 					bodyLines.push(
-						theme.fg("muted", `… ${hidden} more ${pluralize(hidden, "line")} (${editorHint("to expand", theme)})`),
+						theme.fg("muted", `… ${hidden} more ${pluralize(hidden, "line")}`),
 					);
 				}
 				return padCallBlock(text(bodyLines.join("\n")), theme, context);
@@ -728,7 +713,6 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 					diffKey?: string;
 					diffComponent?: Component;
 				};
-				// Collapsed by default; expand with Ctrl+O for the full adaptive diff.
 				const diffKey = [
 					expanded ? "1" : "0",
 					diff,
@@ -749,7 +733,7 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 						theme.fg("toolDiffRemoved", `-${stats.removals}`),
 						theme.fg("muted", `${stats.hunks} ${pluralize(stats.hunks, "hunk")}`),
 					].join(theme.fg("muted", " • "));
-					component = padBlock(text(`${summary}${expandHint(theme)}`));
+					component = padBlock(text(summary));
 				} else {
 					component = padBlock(
 						renderDiff(
@@ -803,7 +787,7 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 					return padBlock(text(theme.fg("toolOutput", joinSections(body || resultText || theme.fg("muted", "(no matches)"), warningLine(notice, theme)))));
 				}
 				const count = countGrepMatches(resultText);
-				const summary = `${theme.fg("muted", `${count} ${pluralize(count, "match")}`)}${expandHint(theme)}`;
+				const summary = theme.fg("muted", `${count} ${pluralize(count, "match")}`);
 				return padBlock(text(joinSections(summary, warningLine(notice, theme))));
 			},
 		});
@@ -841,7 +825,7 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 					return padBlock(text(theme.fg("toolOutput", joinSections(body || resultText || theme.fg("muted", "(no files)"), warningLine(notice, theme)))));
 				}
 				const count = countFindResults(resultText);
-				const summary = `${theme.fg("muted", `${count} ${pluralize(count, "file")}`)}${expandHint(theme)}`;
+				const summary = theme.fg("muted", `${count} ${pluralize(count, "file")}`);
 				return padBlock(text(joinSections(summary, warningLine(notice, theme))));
 			},
 		});
@@ -878,7 +862,7 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 					return padBlock(text(theme.fg("toolOutput", joinSections(body || resultText || theme.fg("muted", "(empty directory)"), warningLine(notice, theme)))));
 				}
 				const count = countLsEntries(resultText);
-				const summary = `${theme.fg("muted", `${count} ${pluralize(count, "entry")}`)}${expandHint(theme)}`;
+				const summary = theme.fg("muted", `${count} ${pluralize(count, "entry")}`);
 				return padBlock(text(joinSections(summary, warningLine(notice, theme))));
 			},
 		});
@@ -944,7 +928,7 @@ function createFffGrepRenderers() {
 				return text(theme.fg("toolOutput", body || resultText || theme.fg("muted", "(no matches)")));
 			}
 			const count = totalMatchedFromDetails(result) ?? countFffGrepMatches(resultText);
-			const summary = `${theme.fg("muted", `${count} ${pluralize(count, "match")}`)}${expandHint(theme)}`;
+			const summary = theme.fg("muted", `${count} ${pluralize(count, "match")}`);
 			return text(summary);
 		},
 	};
@@ -982,7 +966,7 @@ function createFffFindRenderers() {
 				return text(theme.fg("toolOutput", body || resultText || theme.fg("muted", "(no files)")));
 			}
 			const count = totalMatchedFromDetails(result) ?? countFffFindResults(resultText);
-			const summary = `${theme.fg("muted", `${count} ${pluralize(count, "file")}`)}${expandHint(theme)}`;
+			const summary = theme.fg("muted", `${count} ${pluralize(count, "file")}`);
 			return text(summary);
 		},
 	};
@@ -1342,7 +1326,6 @@ function installGroupPatch(): void {
 		}
 		const group = component[TD_GROUP];
 		const click = event.type === "click" && event.button === "left";
-		// Wheel/move/press must return undefined so the TUI still routes the wheel to ScrollView.
 		if (!click) {
 			return group || !component.expanded ? undefined : origMouse.call(this, event);
 		}

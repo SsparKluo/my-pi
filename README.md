@@ -134,7 +134,7 @@ Footer line 1/2 also surface other extensions' `ctx.ui.setStatus` values:
  └ 3 tools called: 2 × read, 1 × bash
 ```
 
-Click a member line to expand just that call; click the `└` footer or Ctrl+O to expand the whole batch (splits back into independent blocks). When `pi-rtk-optimizer` rewrites a Bash command, the final timing line appends `· rtk rewritten`. Does **not** touch user-message rendering.
+Click a member line to expand just that call; click the `└` footer to expand the whole batch (splits back into independent blocks). When `pi-rtk-optimizer` rewrites a Bash command, the final timing line appends `· rtk rewritten`. Does **not** touch user-message rendering.
 
 ### Config: `~/.pi/agent/tool-display.json`
 
