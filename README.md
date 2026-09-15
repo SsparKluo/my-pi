@@ -134,6 +134,14 @@ Footer line 1/2 also surface other extensions' `ctx.ui.setStatus` values:
  ▸ 3 tools called: 2 read, 1 bash ✗
 ```
 
+Expanded detail blocks hang under the call line behind a `└` corner:
+
+```
+ ● bash $ node test/… · 17 lines
+   └ file:///…/tool-display-group.test.mjs:13
+     const ok = (name) => ({ name, isError: false });
+```
+
 Click a member line to expand just that call; click the `└` footer to expand the whole batch (splits back into independent blocks). When `pi-rtk-optimizer` rewrites a Bash command, the final timing line appends `· rtk rewritten`. Does **not** touch user-message rendering.
 
 ### Config: `~/.pi/agent/tool-display.json`

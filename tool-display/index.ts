@@ -26,6 +26,7 @@ import { ALL_TOOL_NAMES, loadConfig, type ToolDisplayConfig, type ToolName } fro
 import {
 	formatGroupFooter,
 	GROUP_ARROW,
+	GROUP_CORNER,
 	GROUP_HANG,
 	isCompactSummary,
 	joinCompactLine,
@@ -468,13 +469,65 @@ function getEditPrepareArguments(tool: BuiltInTools["edit"] | undefined) {
 	return typeof prepareArguments === "function" ? prepareArguments : undefined;
 }
 
+/** Prefix expanded detail blocks with a muted corner and one extra hang column. */
+function detailCornerBlock(component: Component, theme: Theme): Component {
+	const corner = theme.fg("muted", GROUP_CORNER);
+	let cache: { width: number; lines: string[] } | undefined;
+	return {
+		render(width: number): string[] {
+			const safeWidth = Math.max(width, 2);
+			if (cache && cache.width === safeWidth) {
+				return cache.lines;
+			}
+			const indentFirst = `${toolResultPad}${corner} `;
+			const indentRest = " ".repeat(toolResultPadCols + 2);
+			const out: string[] = [];
+			let placed = false;
+			for (const line of component.render(safeWidth - 2)) {
+				const { core, blank } = stripAndCheck(stripHangPad(line, toolResultPadCols));
+				if (blank) {
+					out.push(indentRest);
+					continue;
+				}
+				out.push(placed ? `${indentRest}${core}` : `${indentFirst}${core}`);
+				placed = true;
+			}
+			cache = { width: safeWidth, lines: out };
+			return out;
+		},
+		invalidate() {
+			cache = undefined;
+			component.invalidate();
+		},
+	};
+}
+
+function withExpandedCorner<T extends { renderResult?: unknown }>(spec: T): T {
+	const orig = spec.renderResult as
+		| ((result: unknown, opts: { expanded?: boolean } | undefined, theme: Theme, ctx: unknown) => Component)
+		| undefined;
+	if (typeof orig !== "function") {
+			return spec;
+	}
+	return {
+		...spec,
+		renderResult(result, opts, theme, ctx) {
+			const component = orig.call(spec, result, opts, theme, ctx);
+			return opts?.expanded ? detailCornerBlock(component, theme) : component;
+		},
+	} as T;
+}
+
 function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayConfig) {
 	applyChromeConfig(config);
 	const referenceTools = getBuiltInTools(cwd);
 	const editPrepareArguments = getEditPrepareArguments(referenceTools.edit);
+	const origRegisterTool = pi.registerTool.bind(pi);
+	const registerTool = (spec: Parameters<ExtensionAPI["registerTool"]>[0]) =>
+		origRegisterTool(withExpandedCorner(spec));
 
 	if (config.enabled.read) {
-		pi.registerTool({
+		registerTool({
 			name: "read",
 			label: "read",
 			renderShell: "self",
@@ -505,7 +558,7 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 	}
 
 	if (config.enabled.write) {
-		pi.registerTool({
+		registerTool({
 			name: "write",
 			label: "write",
 			renderShell: "self",
@@ -541,7 +594,7 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 	}
 
 	if (config.enabled.bash) {
-		pi.registerTool({
+		registerTool({
 			name: "bash",
 			label: "bash",
 			renderShell: "self",
@@ -679,7 +732,7 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 	}
 
 	if (config.enabled.edit) {
-		pi.registerTool({
+		registerTool({
 			name: "edit",
 			label: "edit",
 			renderShell: "self",
@@ -757,7 +810,7 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 	}
 
 	if (config.enabled.grep) {
-		pi.registerTool({
+		registerTool({
 			name: "grep",
 			label: "grep",
 			renderShell: "self",
@@ -795,7 +848,7 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 	}
 
 	if (config.enabled.find) {
-		pi.registerTool({
+		registerTool({
 			name: "find",
 			label: "find",
 			renderShell: "self",
@@ -833,7 +886,7 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 	}
 
 	if (config.enabled.ls) {
-		pi.registerTool({
+		registerTool({
 			name: "ls",
 			label: "ls",
 			renderShell: "self",
