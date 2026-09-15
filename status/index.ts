@@ -257,9 +257,9 @@ function createFooterFactory(
 // are assumed to be fallout from our own git commands and ignored.
 const GIT_SELF_EVENT_GRACE_MS = 1_000;
 
-function formatDuration(ms: number, prefix: string): string {
-  return `${prefix} ${formatDurationOnly(ms)}`;
-}
+// Static working text: the elapsed time is rendered by the editor border
+// (editor.ts renderTopBorder), not carried in this message.
+const WORKING_MESSAGE = "Working";
 
 // ── Working message timer ──
 //
@@ -275,7 +275,7 @@ function startWorkingMessage(ctx: ExtensionContext, state: AppState) {
   // Demarcate this turn: every assistant message from here on belongs to it
   // (a turn spans one request per tool-call round, plus any retries).
   state.turnStartEntryIndex = ctx.sessionManager.getEntries().length;
-  ctx.ui.setWorkingMessage(formatDuration(0, "Working for"));
+  ctx.ui.setWorkingMessage(WORKING_MESSAGE);
   state.workingMessageTimer = setInterval(() => {
     if (state.agentStartMs === null) return;
     // Only update the text. setWorkingMessage() updates the loader when pi
@@ -296,7 +296,7 @@ function startWorkingMessage(ctx: ExtensionContext, state: AppState) {
     // gets pinned on long sessions
     // and the TUI becomes unresponsive ("卡死"). Letting pi own the loader
     // and only updating the text removes the conflict entirely.
-    ctx.ui.setWorkingMessage(formatDuration(Date.now() - state.agentStartMs, "Working for"));
+    ctx.ui.setWorkingMessage(WORKING_MESSAGE);
   }, 1_000);
 }
 
@@ -830,7 +830,7 @@ export default function (pi: ExtensionAPI) {
     // pi's indicator lifecycle and can freeze the TUI (see startWorkingMessage).
     // setWorkingMessage() is a no-op when pi has no active working loader.
     if (state.isWorking && state.agentStartMs !== null) {
-      ctx.ui.setWorkingMessage(formatDuration(Date.now() - state.agentStartMs, "Working for"));
+      ctx.ui.setWorkingMessage(WORKING_MESSAGE);
     }
   });
 

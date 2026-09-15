@@ -77,6 +77,7 @@ import {
 	SelectList,
 	type SelectListLayoutOptions,
 	type TUI,
+	visibleWidth,
 } from "@earendil-works/pi-tui";
 
 /**
@@ -611,11 +612,28 @@ function dimBashModeBorder(theme: Theme): (s: string) => string {
 	return (s: string) => theme.fg("dim", s);
 }
 
+/** Structural slice of pi's WorkingStatusIndicator (the class is not exported). */
+interface WorkingBorderIndicator {
+	renderInBorder(width: number): string;
+	renderSpinnerInBorder(width: number): string;
+}
+
+/** `1m 44s`-style elapsed time, mirroring the status extension's format. */
+function formatElapsed(ms: number): string {
+	const total = Math.round(ms / 1000);
+	const h = Math.floor(total / 3600);
+	const m = Math.floor((total % 3600) / 60);
+	const s = total % 60;
+	return [h > 0 && `${h}h`, (h > 0 || m > 0) && `${m}m`, `${s}s`].filter(Boolean).join(" ");
+}
+
 export class SkillHighlightEditor extends CustomEditor {
 	private piTheme: Theme;
 	private skillIndex: Map<string, SkillEntry>;
 	/** Last caret/token state probed by probeSkillAutocomplete (dedupe). */
 	private lastAutocompleteProbe = "";
+	/** Instant the current working indicator was set; null when idle. */
+	private workingSince: number | null = null;
 
 	constructor(
 		tui: TUI,
@@ -624,7 +642,7 @@ export class SkillHighlightEditor extends CustomEditor {
 		theme: Theme,
 		skillIndex: Map<string, SkillEntry>,
 	) {
-		super(tui, editorTheme, keybindings);
+		super(tui, editorTheme, keybindings, { embedWorkingStatus: true });
 		this.piTheme = theme;
 		this.skillIndex = skillIndex;
 
@@ -682,6 +700,38 @@ export class SkillHighlightEditor extends CustomEditor {
 		if (key === this.lastAutocompleteProbe) return;
 		this.lastAutocompleteProbe = key;
 		editor.tryTriggerAutocomplete();
+	}
+
+	// Working-indicator lifecycle: pi calls this when a turn starts streaming
+	// (indicator set) and when it ends (undefined). Record the start instant so
+	// renderTopBorder can right-align the elapsed time without any timer of its
+	// own — the spinner animation already re-renders the border continuously.
+	override setWorkingStatusIndicator(indicator: WorkingBorderIndicator | undefined): void {
+		this.workingSince = indicator ? (this.workingSince ?? Date.now()) : null;
+		super.setWorkingStatusIndicator(indicator);
+	}
+
+	// Border layout while streaming: `── ⠦ Working ───── 1m 44s ──`. Falls back
+	// to pi's own top border whenever the time block would compete for space
+	// (narrow width or hidden-line overflow label), dropping the time first.
+	protected override renderTopBorder(width: number, hiddenLineCount: number): string {
+		const indicator = (this as unknown as { workingStatusIndicator?: WorkingBorderIndicator }).workingStatusIndicator;
+		if (!indicator || this.workingSince === null || width <= 0 || hiddenLineCount > 0) {
+			return super.renderTopBorder(width, hiddenLineCount);
+		}
+		const time = formatElapsed(Date.now() - this.workingSince);
+		const budget = Math.max(1, width - 3 - 1 - (time.length + 4));
+		// renderInBorder bakes colors in at Loader animation-tick time — outside
+		// our render, when borderColor is pi's thinking color — so strip and
+		// re-apply the live mode color; otherwise the text stays purple while
+		// the dashes and time follow the border.
+		const status = this.borderColor(indicator.renderInBorder(budget).replace(/\x1b\[[0-9;]*m/g, ""));
+		const statusWidth = visibleWidth(status);
+		if (statusWidth === 0) return super.renderTopBorder(width, hiddenLineCount);
+		const right = ` ${time} ──`;
+		const mid = width - (3 + statusWidth + 1) - visibleWidth(right);
+		if (mid < 1) return super.renderTopBorder(width, hiddenLineCount);
+		return this.borderColor("── ") + status + this.borderColor(` ${"─".repeat(mid)}${right}`);
 	}
 
 	// Highlight `$skill` mentions on the text rows (between the top border and

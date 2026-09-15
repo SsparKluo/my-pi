@@ -386,7 +386,7 @@ No other config file.
 
 | Extension | What it does | Notes |
 |-----------|--------------|-------|
-| **editor** | Mode-colored input border; `$skill` mentions + picker | No config file |
+| **editor** | Mode-colored input border; `$skill` mentions + picker; streaming spinner in the top border with right-aligned elapsed time | No config file |
 | **request-logger** | Logs every provider request to `~/.pi/agent/requests/<session>.request.log` | Output dir only; no knobs |
 | **shortcuts** | `Ctrl+Shift+C` → copy editor content to clipboard | No config file |
 
