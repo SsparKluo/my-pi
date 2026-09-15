@@ -1,7 +1,7 @@
 /** Hang column for group body/footer lines. */
 export const GROUP_HANG = 2;
 /** Expand affordance on the collapsed group footer. */
-export const GROUP_ARROW = "▸";
+export const GROUP_ARROW = "└";
 /** Corner marking the start of an expanded detail block. */
 export const GROUP_CORNER = "└";
 
