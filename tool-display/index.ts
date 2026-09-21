@@ -511,7 +511,12 @@ function withExpandedCorner<T extends { renderResult?: unknown }>(spec: T): T {
 	}
 	return {
 		...spec,
-		renderResult(result, opts, theme, ctx) {
+		renderResult(
+			result: unknown,
+			opts: { expanded?: boolean } | undefined,
+			theme: Theme,
+			ctx: unknown,
+		) {
 			const component = orig.call(spec, result, opts, theme, ctx);
 			return opts?.expanded ? detailCornerBlock(component, theme) : component;
 		},
@@ -523,8 +528,9 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 	const referenceTools = getBuiltInTools(cwd);
 	const editPrepareArguments = getEditPrepareArguments(referenceTools.edit);
 	const origRegisterTool = pi.registerTool.bind(pi);
-	const registerTool = (spec: Parameters<ExtensionAPI["registerTool"]>[0]) =>
+	const registerTool: ExtensionAPI["registerTool"] = (spec) => {
 		origRegisterTool(withExpandedCorner(spec));
+	};
 
 	if (config.enabled.read) {
 		registerTool({
@@ -1159,7 +1165,7 @@ type CompactCache = {
 	wrapped: string[];
 };
 
-type ToolComp = ToolExecutionComponent & {
+type ToolComp = {
 	[TD_PARENT]?: { children: unknown[] };
 	[TD_GROUP]?: GroupMeta;
 	[TD_COMPACT]?: CompactCache;
