@@ -183,6 +183,31 @@ test("schema violation: tools.<name>.snippet must be non-empty string", () => {
 	}
 });
 
+test("tools entry without snippet is valid (guidelines-only)", () => {
+	const env = setupEnv();
+	try {
+		writeGlobal(env, { tools: { read: { guidelines: ["Use read over cat."] } } });
+		const cfg = load(env);
+		assert.deepEqual(cfg.errors, []);
+		assert.equal(cfg.tools.read.snippet, undefined);
+		assert.deepEqual(cfg.tools.read.guidelines, ["Use read over cat."]);
+	} finally {
+		env.cleanup();
+	}
+});
+
+test("schema violation: tools.<name> must be an object", () => {
+	const env = setupEnv();
+	try {
+		writeProject(env, { tools: { read: "not an object" } });
+		const cfg = load(env);
+		assert.equal(cfg.errors.length, 1);
+		assert.match(cfg.errors[0], /tools\.read must be an object/);
+	} finally {
+		env.cleanup();
+	}
+});
+
 test("schema violation: basePrompt must be a string", () => {
 	const env = setupEnv();
 	try {

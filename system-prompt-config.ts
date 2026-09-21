@@ -59,7 +59,13 @@ function readConfig(path: string): ConfigReadResult {
 		const parsedTools: Record<string, ToolPromptSpec> = {};
 		if (isRecord(tools)) {
 			for (const [name, rawTool] of Object.entries(tools)) {
-				if (!isRecord(rawTool) || typeof rawTool.snippet !== "string" || !rawTool.snippet.trim()) {
+				if (!isRecord(rawTool)) {
+					return { error: `${path}: tools.${name} must be an object` };
+				}
+				if (
+					rawTool.snippet !== undefined &&
+					(typeof rawTool.snippet !== "string" || !rawTool.snippet.trim())
+				) {
 					return { error: `${path}: tools.${name}.snippet must be a non-empty string` };
 				}
 				if (
@@ -68,8 +74,9 @@ function readConfig(path: string): ConfigReadResult {
 				) {
 					return { error: `${path}: tools.${name}.guidelines must be an array of strings` };
 				}
+				const snippet = typeof rawTool.snippet === "string" ? rawTool.snippet.trim() : undefined;
 				parsedTools[name] = {
-					snippet: rawTool.snippet.trim(),
+					snippet: snippet || undefined,
 					guidelines: rawTool.guidelines.map((item) => item.trim()).filter(Boolean),
 				};
 			}

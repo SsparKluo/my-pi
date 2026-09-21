@@ -3,8 +3,7 @@ import { resolve } from "node:path";
 import type { EnvironmentInfo } from "./system-prompt-core.ts";
 
 /**
- * Build the <env> block fields:
- * - cwd:       process working directory
+ * Build the <env> fields:
  * - worktree:  git top-level if inside a git repo, otherwise cwd
  * - isGitRepo: true when cwd is inside a git work tree
  * - platform:  process.platform
@@ -42,5 +41,5 @@ export function detectEnvironment(cwd: string): EnvironmentInfo {
 		}
 	}
 
-	return { cwd: normalized, worktree, isGitRepo, platform: process.platform };
+	return { worktree, isGitRepo, platform: process.platform };
 }

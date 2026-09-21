@@ -270,7 +270,7 @@ Full design (bash cascade, ask keybinds, classifier context): [`pi-mode/README.m
 
 ## system-prompt — managed system prompt
 
-**What it does.** Builds a configurable system prompt while keeping Pi's own resource discovery (AGENTS, skills, tools).
+**What it does.** Customizes Pi's system prompt by composing into Pi's native prompt sections (needs `pi ≥ 0.86`). The extension never rebuilds or string-matches Pi's prompt text — it mutates `systemPromptOptions` on the `before_agent_start` event and lets Pi render.
 
 ### Config: two files, merged
 
@@ -288,66 +288,69 @@ Full design (bash cascade, ask keybinds, classifier context): [`pi-mode/README.m
 
 ```json
 {
-  "basePrompt": "You are a focused coding assistant. Follow the user's request and use the available tools when needed.",
-  "general": [
-    "Be concise in your responses.",
-    "Show file paths clearly when working with files."
-  ],
-  "tools": {
-    "read": {
-      "snippet": "Read file contents.",
-      "guidelines": [
-        "Read the relevant files before editing them."
-      ]
-    },
-    "bash": {
-      "snippet": "Run shell commands.",
-      "guidelines": [
-        "Prefer rg for searching files."
-      ]
-    }
-  }
+	"basePrompt": "You are a focused coding assistant. Follow the user's request and use the available tools when needed.",
+	"general": [
+		"Be concise in your responses.",
+		"Show file paths clearly when working with files."
+	],
+	"tools": {
+		"read": {
+			"guidelines": [
+				"Read the relevant files before editing them."
+			]
+		},
+		"bash": {
+			"guidelines": [
+				"Prefer rg for searching files."
+			]
+		}
+	}
 }
 ```
 
 | Field | Required | Meaning |
 |-------|----------|---------|
-| `basePrompt` | no | Persona / base text. Non-empty → **replace** Pi's whole default prefix with the managed prompt. Empty/absent → only swap the available-tools block (+ inject general). |
-| `general` | no | `string[]` → `<general_guidelines>` |
-| `tools.<name>.snippet` | yes (per tool) | One-line description in `<tool_use>` (must be non-empty) |
-| `tools.<name>.guidelines` | yes (per tool) | `string[]` of per-tool preferences (may be empty `[]`) |
+| `basePrompt` | no | Persona / base text. Non-empty → replaces Pi's default preamble (Pi's native `<tools>`/`<rules>`/`<docs>` are suppressed); the configured sections below ride along. Absent → compose into Pi's native sections instead. |
+| `general` | no | `string[]` of general guidelines |
+| `tools.<name>.snippet` | no | One-line override for that tool's line in Pi's native `<tools>` section (no-`basePrompt` path only; if present it must be non-empty) |
+| `tools.<name>.guidelines` | no | `string[]` of per-tool preferences |
 
 **Guideline principle.** Tool schema `description` fields are always sent via the API `tools` param regardless of the system prompt. Put only what the schema does **not** say in `guidelines` (preferences, workflows, discipline) — restating schema text wastes tokens.
 
-### What gets assembled (when `basePrompt` is set)
+### Without `basePrompt` — compose into Pi's native sections
+
+- `tools.<name>.snippet` overrides that tool's line in Pi's native `<tools>` section
+- `tools.<name>.guidelines` join that tool's `toolGuidelines`, rendered as bullets in Pi's native `<rules>` section
+- `general` bullets append to `promptGuidelines` (also `<rules>`)
+
+Pi's own preamble, `<docs>`, AGENTS.md (`<project_context>`), skills, and `<cwd>` are untouched.
+
+### With `basePrompt` — replace the preamble, keep Pi's resources
 
 ```text
-{basePrompt}
+{basePrompt}                                     ← customPrompt; Pi's <tools>/<rules>/<docs> suppressed
+
+<project_context>…</project_context>             ← Pi native: AGENTS/CLAUDE files
+<skills>…</skills>                               ← Pi native: skill list (read/bash-aware loading hint)
+<cwd>…</cwd>                                     ← Pi native
 
 <general_guidelines>
 - …
 </general_guidelines>
 
 <tool_use>
-- read: …
-  - …
+- read: Read the relevant files before editing them.
+- bash: Prefer rg for searching files.
 </tool_use>
 
 <env>
-  Working directory: …
-  Workspace root folder: …
-  Is directory a git repo: yes|no
-  Platform: …
+Workspace root folder: …
+Is directory a git repo: yes|no
+Platform: …
 </env>
-
-<global_instruction>…</global_instruction>     ← AGENTS/CLAUDE under agent dir
-<project_instruction>…</project_instruction>     ← AGENTS/CLAUDE under project
-<available_skills>…</available_skills>           ← Pi's skill formatter (if read is enabled)
 ```
 
-Only tools currently enabled by Pi appear under `<tool_use>`; an unconfigured enabled tool falls back to Pi's own one-line snippet. Context files and skills are never rediscovered by this extension — they follow Pi's loader and flags.
-
-When `basePrompt` is absent, the extension only replaces Pi's "Available tools:" block with `<tool_use>`, injects `<general_guidelines>` if configured, and strips Pi's default `Guidelines:` section. The rest of Pi's prompt is preserved.
+`<tool_use>` holds one `- <tool>: <guideline>` line per configured guideline, in tool-loadout order; tools without guidelines (and tools outside the current loadout) don't appear. Configured `snippet`s are ignored on this path — schema restatements belong in the API `tools` param, not the prompt. Context files and skills are never rediscovered by this extension — they follow Pi's loader and flags.
 
 ---
 
