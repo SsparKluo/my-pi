@@ -45,8 +45,6 @@ export interface ToolDisplayConfig {
 	diffColumnWidth: number;
 	/** Syntax-highlight diff context lines via pi's built-in highlightCode. */
 	diffSyntaxHighlight: boolean;
-	/** Left padding (spaces) applied to every line of a tool block. */
-	paddingX: number;
 	/** Collapse consecutive parallel tool calls into one block. */
 	groupParallel: boolean;
 	/** Per-tool opt-out. A tool stays on pi's built-in renderer when false. */
@@ -60,7 +58,6 @@ export const DEFAULT_CONFIG: ToolDisplayConfig = {
 	diffMode: "auto",
 	diffColumnWidth: 100,
 	diffSyntaxHighlight: false,
-	paddingX: 1,
 	groupParallel: true,
 	enabled: {
 		read: true,
@@ -182,15 +179,6 @@ export function loadConfigFromFile(configPath: string): LoadConfigResult {
 		}
 	}
 
-	const paddingX = raw.paddingX;
-	if (paddingX !== undefined) {
-		if (isNonNegativeInt(paddingX)) {
-			config.paddingX = paddingX;
-		} else {
-			errors.push("paddingX must be a non-negative integer");
-		}
-	}
-
 	const groupParallel = raw.groupParallel;
 	if (groupParallel !== undefined) {
 		if (typeof groupParallel === "boolean") {
@@ -230,4 +218,23 @@ export function loadConfigFromFile(configPath: string): LoadConfigResult {
 /** Load and validate the global tool-display config (~/.pi/agent/tool-display.json). */
 export function loadConfig(): LoadConfigResult {
 	return loadConfigFromFile(CONFIG_PATH);
+}
+
+/**
+ * pi's outputPad setting (0 = flush left, 1 = one space), normalized exactly like
+ * settings-manager's getOutputPad(): only an explicit 0 yields 0, anything else is 1.
+ * Read from pi's global settings.json; missing or malformed file falls back to 1.
+ */
+export function readOutputPadFrom(agentDir: string): number {
+	try {
+		const raw: unknown = JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8"));
+		return isRecord(raw) && raw.outputPad === 0 ? 0 : 1;
+	} catch {
+		return 1;
+	}
+}
+
+export function readOutputPad(): number {
+	const agentDir = process.env.PI_AGENT_DIR || join(homedir(), ".pi", "agent");
+	return readOutputPadFrom(agentDir);
 }

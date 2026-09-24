@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_CONFIG, loadConfigFromFile } from "../tool-display/config.ts";
+import { DEFAULT_CONFIG, loadConfigFromFile, readOutputPadFrom } from "../tool-display/config.ts";
 
 function tmpConfigPath() {
 	const dir = mkdtempSync(join(tmpdir(), "td-cfg-"));
@@ -21,7 +21,6 @@ test("absent file yields defaults and absent=true", () => {
 		assert.equal(config.bashRevealCommand, DEFAULT_CONFIG.bashRevealCommand);
 		assert.equal(config.diffMode, DEFAULT_CONFIG.diffMode);
 		assert.equal(config.diffColumnWidth, DEFAULT_CONFIG.diffColumnWidth);
-		assert.equal(config.paddingX, DEFAULT_CONFIG.paddingX);
 		assert.equal(config.groupParallel, true);
 		assert.deepEqual(config.enabled, DEFAULT_CONFIG.enabled);
 	} finally {
@@ -41,7 +40,6 @@ test("valid file overrides defaults", () => {
 				diffMode: "dual",
 				diffColumnWidth: 120,
 				diffSyntaxHighlight: false,
-				paddingX: 4,
 				groupParallel: false,
 				enabled: { read: false, bash: false },
 			}),
@@ -55,7 +53,6 @@ test("valid file overrides defaults", () => {
 		assert.equal(config.diffMode, "dual");
 		assert.equal(config.diffColumnWidth, 120);
 		assert.equal(config.diffSyntaxHighlight, false);
-		assert.equal(config.paddingX, 4);
 		assert.equal(config.groupParallel, false);
 		assert.equal(config.enabled.read, false);
 		assert.equal(config.enabled.bash, false);
@@ -78,7 +75,6 @@ test("invalid fields report errors and fall back to defaults", () => {
 				bashRevealCommand: "yes",
 				diffMode: "wide",
 				diffColumnWidth: 0,
-				paddingX: -1,
 				groupParallel: "yes",
 				enabled: { read: 1, bogus: true },
 			}),
@@ -89,7 +85,6 @@ test("invalid fields report errors and fall back to defaults", () => {
 		assert.ok(errors.includes("bashRevealCommand must be a boolean"));
 		assert.ok(errors.includes("diffMode must be one of auto, single, dual"));
 		assert.ok(errors.includes("diffColumnWidth must be a positive integer"));
-		assert.ok(errors.includes("paddingX must be a non-negative integer"));
 		assert.ok(errors.includes("groupParallel must be a boolean"));
 		assert.ok(errors.includes("enabled.read must be a boolean"));
 		assert.ok(errors.includes('enabled has unknown tool "bogus"'));
@@ -99,7 +94,6 @@ test("invalid fields report errors and fall back to defaults", () => {
 		assert.equal(config.bashRevealCommand, DEFAULT_CONFIG.bashRevealCommand);
 		assert.equal(config.diffMode, DEFAULT_CONFIG.diffMode);
 		assert.equal(config.diffColumnWidth, DEFAULT_CONFIG.diffColumnWidth);
-		assert.equal(config.paddingX, DEFAULT_CONFIG.paddingX);
 		assert.equal(config.groupParallel, true);
 		assert.equal(config.enabled.read, DEFAULT_CONFIG.enabled.read);
 	} finally {
@@ -136,4 +130,25 @@ test("does not touch the real global path", () => {
 	// Sanity: the default path constant points under ~/.pi/agent, not a temp dir.
 	const { path } = loadConfigFromFile(join(tmpdir(), "definitely-absent-tool-display.json"));
 	assert.equal(existsSync(path), false);
+});
+
+test("readOutputPadFrom mirrors pi's getOutputPad normalization", () => {
+	const { dir } = tmpConfigPath();
+	const settingsPath = join(dir, "settings.json");
+	try {
+		writeFileSync(settingsPath, JSON.stringify({ outputPad: 0 }));
+		assert.equal(readOutputPadFrom(dir), 0);
+		writeFileSync(settingsPath, JSON.stringify({ outputPad: 1 }));
+		assert.equal(readOutputPadFrom(dir), 1);
+		writeFileSync(settingsPath, JSON.stringify({ outputPad: 2 }));
+		assert.equal(readOutputPadFrom(dir), 1);
+		writeFileSync(settingsPath, JSON.stringify({}));
+		assert.equal(readOutputPadFrom(dir), 1);
+		writeFileSync(settingsPath, "{broken");
+		assert.equal(readOutputPadFrom(dir), 1);
+		rmSync(settingsPath);
+		assert.equal(readOutputPadFrom(dir), 1);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
 });

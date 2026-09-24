@@ -156,7 +156,6 @@ Global only — no project-level file. All keys optional; invalid fields fall ba
   "diffMode": "auto",
   "diffColumnWidth": 100,
   "diffSyntaxHighlight": false,
-  "paddingX": 1,
   "groupParallel": true,
   "enabled": {
     "read": true,
@@ -180,9 +179,10 @@ Global only — no project-level file. All keys optional; invalid fields fall ba
 | `diffMode` | `"auto"` | `"auto"` \| `"single"` \| `"dual"` |
 | `diffColumnWidth` | `100` | Width at which `"auto"` switches to side-by-side |
 | `diffSyntaxHighlight` | `false` | Highlight diff context via pi's built-in `highlightCode` |
-| `paddingX` | `1` | Left padding (spaces) on every tool-block line |
 | `groupParallel` | `true` | `false` = do not collapse consecutive tool calls (old two-line blocks) |
 | `enabled.<tool>` | `true` | `false` = keep pi's built-in renderer for that tool |
+
+Tool-block left padding is not configurable here — it follows pi's `outputPad` setting (`0` = flush left, `1` = one space), so tool blocks stay aligned with the surrounding text. Read at extension load and on `session_start`; a mid-session `outputPad` change applies to new sessions.
 
 ---
 

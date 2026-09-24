@@ -22,7 +22,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Container, Text, type Component } from "@earendil-works/pi-tui";
 import { renderDiff } from "./diff.ts";
-import { ALL_TOOL_NAMES, loadConfig, type ToolDisplayConfig, type ToolName } from "./config.ts";
+import { ALL_TOOL_NAMES, loadConfig, readOutputPad, type ToolDisplayConfig, type ToolName } from "./config.ts";
 import {
 	formatGroupFooter,
 	GROUP_ARROW,
@@ -94,7 +94,7 @@ type CallChrome = {
 	isPartial?: boolean;
 };
 
-/** Left pad before `●` on call lines. From config.paddingX. */
+/** Left pad before `●` on call lines. From pi's outputPad setting. */
 let toolBlockPad = " ";
 /** Hang result lines under the call title (after `{pad}● `). */
 let toolResultPad = "   ";
@@ -105,7 +105,7 @@ let groupParallelEnabled = true;
 let lastTheme: Theme | undefined;
 
 function applyChromeConfig(config: ToolDisplayConfig): void {
-	const pad = Math.max(0, config.paddingX);
+	const pad = readOutputPad();
 	toolBlockPad = " ".repeat(pad);
 	toolBlockPadCols = pad;
 	// Align under body text after the status marker: `{pad}● ` is pad + 2 cols.
@@ -230,7 +230,7 @@ function padCallBlock(body: Component, theme: Theme, chrome: CallChrome = {}): C
  * Generic self-shell chrome for any tool renderer pair.
  * Body renderers return content only (no pad/dot); this layer adds:
  * - renderShell: "self"
- * - block pad (config.paddingX) on every line
+ * - block pad (pi's outputPad setting) on every line
  * - status ● on the first call line
  */
 function withSelfShell<TCall extends (...args: any[]) => Component, TResult extends (...args: any[]) => Component>(handlers: {
