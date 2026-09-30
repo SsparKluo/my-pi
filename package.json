@@ -19,7 +19,10 @@
 		"startup-header.ts",
 		"system-prompt.ts",
 		"system-prompt-core.ts",
+		"system-prompt-config.ts",
 		"system-prompt-env.ts",
+		"tool-loadout.ts",
+		"tool-loadout-config.ts",
 		"status/",
 		"tool-display/",
 		"pi-mode/"
@@ -32,6 +35,7 @@
 			"./429-retry.ts",
 			"./startup-header.ts",
 			"./system-prompt.ts",
+			"./tool-loadout.ts",
 			"./status/",
 			"./tool-display/",
 			"./pi-mode/src/index.ts"

@@ -5,6 +5,7 @@ import {
 	formatEnvironment,
 	formatGeneralGuidelines,
 	formatToolGuidelines,
+	hasContextTools,
 	uniqueGuidelines,
 } from "../system-prompt-core.ts";
 
@@ -80,6 +81,51 @@ test("composeManagedPreamble: guidelines sit in the preamble, before any later n
 	);
 	assert.ok(out.startsWith("You are an expert assistant."));
 	assert.ok(out.indexOf("<general_guidelines>") < out.indexOf("<tool_use>"));
+});
+
+test("hasContextTools: ctx_* names only", () => {
+	assert.equal(hasContextTools(["read", "bash"]), false);
+	assert.equal(hasContextTools(["read", "ctx_search"]), true);
+});
+
+test("composeManagedPreamble: context_management sits between general and tool_use when ctx_* tools are selected", () => {
+	const out = composeManagedPreamble({
+		basePrompt: "Hello.",
+		general: ["Be direct."],
+		contextManagement: ["Tidy as you go."],
+		selectedTools: ["read", "ctx_search"],
+		configuredTools: { read: { guidelines: ["Use read."] } },
+		env: { worktree: "/x", isGitRepo: false, platform: "linux" },
+	});
+	assert.ok(out.includes("<context_management>\n- Tidy as you go.\n</context_management>"));
+	assert.ok(out.indexOf("<general_guidelines>") < out.indexOf("<context_management>"));
+	assert.ok(out.indexOf("<context_management>") < out.indexOf("<tool_use>"));
+});
+
+test("composeManagedPreamble: omits context_management without ctx_* tools or without copy", () => {
+	const env = { worktree: "/x", isGitRepo: false, platform: "linux" };
+	assert.equal(
+		composeManagedPreamble({
+			basePrompt: "Hello.",
+			general: [],
+			contextManagement: ["Tidy as you go."],
+			selectedTools: ["read"],
+			configuredTools: {},
+			env,
+		}).includes("<context_management>"),
+		false,
+	);
+	assert.equal(
+		composeManagedPreamble({
+			basePrompt: "Hello.",
+			general: [],
+			contextManagement: [],
+			selectedTools: ["ctx_search"],
+			configuredTools: {},
+			env,
+		}).includes("<context_management>"),
+		false,
+	);
 });
 
 test("composeManagedPreamble: omits empty guideline sections", () => {

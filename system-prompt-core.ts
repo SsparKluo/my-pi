@@ -59,6 +59,11 @@ function wrapSection(name: string, content: string): string {
 	return `<${name}>\n${body}\n</${name}>`;
 }
 
+/** Magic Context / other ctx_* tools. */
+export function hasContextTools(selectedTools: readonly string[]): boolean {
+	return selectedTools.some((name) => name.startsWith("ctx_"));
+}
+
 /**
  * Fold configured guidelines into the preamble so they render ABOVE Pi's native
  * `<project_context>` / `<skills>` / `<cwd>`. Custom `options.sections` are
@@ -67,6 +72,7 @@ function wrapSection(name: string, content: string): string {
 export function composeManagedPreamble(args: {
 	basePrompt: string;
 	general: readonly string[];
+	contextManagement?: readonly string[];
 	selectedTools: readonly string[];
 	configuredTools: Readonly<Record<string, ToolPromptSpec>>;
 	env: EnvironmentInfo;
@@ -74,6 +80,11 @@ export function composeManagedPreamble(args: {
 	const parts = [args.basePrompt.trim()];
 	const general = wrapSection("general_guidelines", formatGeneralGuidelines(args.general));
 	if (general) parts.push(general);
+	const contextManagement =
+		hasContextTools(args.selectedTools) && (args.contextManagement?.length ?? 0) > 0
+			? wrapSection("context_management", formatGeneralGuidelines(args.contextManagement ?? []))
+			: "";
+	if (contextManagement) parts.push(contextManagement);
 	const tools = wrapSection("tool_use", formatToolGuidelines(args.selectedTools, args.configuredTools));
 	if (tools) parts.push(tools);
 	parts.push(wrapSection("env", formatEnvironment(args.env)));

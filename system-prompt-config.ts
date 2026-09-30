@@ -7,6 +7,7 @@ const CONFIG_FILE_NAME = "system-prompt.json";
 export interface SystemPromptConfig {
 	basePrompt?: string;
 	general?: string[];
+	contextManagement?: string[];
 	tools?: Record<string, ToolPromptSpec>;
 }
 
@@ -19,6 +20,7 @@ interface ConfigReadResult {
 export interface EffectiveConfig {
 	basePrompt?: string;
 	general: string[];
+	contextManagement: string[];
 	tools: Record<string, ToolPromptSpec>;
 	errors: string[];
 	/** True only when neither the global nor the project config file exists. */
@@ -49,6 +51,14 @@ function readConfig(path: string): ConfigReadResult {
 			(!Array.isArray(general) || general.some((item) => typeof item !== "string"))
 		) {
 			return { error: `${path}: general must be an array of strings` };
+		}
+
+		const contextManagement = value.contextManagement;
+		if (
+			contextManagement !== undefined &&
+			(!Array.isArray(contextManagement) || contextManagement.some((item) => typeof item !== "string"))
+		) {
+			return { error: `${path}: contextManagement must be an array of strings` };
 		}
 
 		const tools = value.tools;
@@ -86,6 +96,9 @@ function readConfig(path: string): ConfigReadResult {
 			config: {
 				basePrompt: typeof basePrompt === "string" && basePrompt.trim() ? basePrompt : undefined,
 				general: Array.isArray(general) ? general.map((item) => item.trim()).filter(Boolean) : undefined,
+				contextManagement: Array.isArray(contextManagement)
+					? contextManagement.map((item) => item.trim()).filter(Boolean)
+					: undefined,
 				tools: parsedTools,
 			},
 			absent: false,
@@ -113,6 +126,10 @@ export function loadConfig({ cwd, trusted, agentDir, configDirName }: LoadConfig
 		general: [
 			...(globalResult.config?.general ?? []),
 			...(projectResult.config?.general ?? []),
+		],
+		contextManagement: [
+			...(globalResult.config?.contextManagement ?? []),
+			...(projectResult.config?.contextManagement ?? []),
 		],
 		tools: {
 			...(globalResult.config?.tools ?? {}),

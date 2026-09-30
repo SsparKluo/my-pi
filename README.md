@@ -38,6 +38,7 @@ Every config file is optional. Missing files → built-in defaults (pi-mode writ
 | Auto-title model | `~/.pi/agent/settings.json` → `"smallModel"` | global | — |
 | System prompt | `~/.pi/agent/system-prompt.json` | global | — |
 | System prompt (project) | `<project>/.pi/system-prompt.json` | project (trusted only) | — |
+| Hide tools from the model | `~/.pi/agent/tool-loadout.json` | global only | — |
 | Tool call/result rendering | `~/.pi/agent/tool-display.json` | global only | — |
 | Modes / permissions / classifier | `~/.pi/agent/pi-mode-config.jsonc` | global | `/mode`, `--pi-mode` |
 | 429 retry on/off & fixed wait | — | session | `/429-retry` |
@@ -48,6 +49,7 @@ Every config file is optional. Missing files → built-in defaults (pi-mode writ
 ├── settings.json                   # smallModel, quietStartup, packages, …
 ├── statusline-config.json          # status toggles
 ├── system-prompt.json              # system-prompt (global)
+├── tool-loadout.json               # hide tools from the model
 ├── tool-display.json               # tool-display
 ├── pi-mode-config.jsonc            # pi-mode
 └── requests/                       # request-logger output
@@ -283,6 +285,7 @@ Full design (bash cascade, ask keybinds, classifier context): [`pi-mode/README.m
 
 - `basePrompt` — project wins if set, else global
 - `general` — concatenate (global then project)
+- `contextManagement` — concatenate (global then project); rendered only when a `ctx_*` tool is in the loadout
 - `tools` — merge by name; project entry overrides global entry of the same name
 - Neither file exists → extension short-circuits, Pi's prompt untouched
 
@@ -312,6 +315,7 @@ Full design (bash cascade, ask keybinds, classifier context): [`pi-mode/README.m
 |-------|----------|---------|
 | `basePrompt` | no | Persona / base text. Non-empty → replaces Pi's default preamble (Pi's native `<tools>`/`<rules>`/`<docs>` are suppressed); configured guidelines are folded into that preamble so they sit above AGENTS.md/skills. Absent → compose into Pi's native sections instead. |
 | `general` | no | `string[]` of general guidelines |
+| `contextManagement` | no | `string[]` of workspace-context principles. Rendered as `<context_management>` only when a `ctx_*` tool is active. |
 | `tools.<name>.snippet` | no | One-line override for that tool's line in Pi's native `<tools>` section (no-`basePrompt` path only; if present it must be non-empty) |
 | `tools.<name>.guidelines` | no | `string[]` of per-tool preferences |
 
@@ -334,6 +338,10 @@ Pi's own preamble, `<docs>`, AGENTS.md (`<project_context>`), skills, and `<cwd>
 - …
 </general_guidelines>
 
+<context_management>                       ← only if ctx_* tools are active
+- …
+</context_management>
+
 <tool_use>
 - read: Read the relevant files before editing them.
 - bash: Prefer rg for searching files.
@@ -353,6 +361,22 @@ Platform: …
 Guidelines are folded into `customPrompt` (the preamble) so they sit at the top. Pi appends any `options.sections` *after* project_context/skills/cwd, which would bury them.
 
 `<tool_use>` holds one `- <tool>: <guideline>` line per configured guideline, in tool-loadout order; tools without guidelines (and tools outside the current loadout) don't appear. Configured `snippet`s are ignored on this path — schema restatements belong in the API `tools` param, not the prompt. Context files and skills are never rediscovered by this extension — they follow Pi's loader and flags.
+
+---
+
+## tool-loadout — hide tools from the model
+
+**What it does.** Registers a hidden glue tool whose `prepareLoadout` hook omits named tools from the model's tool list. They stay registered and callable internally; the model does not see them. A `tool_call` handler blocks the hidden names if a model still emits one.
+
+### Config: `~/.pi/agent/tool-loadout.json`
+
+```json
+{
+	"hide": ["ctx_note"]
+}
+```
+
+Missing file → hide nothing (the glue tool still hides itself). `hide` is a list of tool names.
 
 ---
 

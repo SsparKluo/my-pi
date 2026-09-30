@@ -91,6 +91,18 @@ test("global basePrompt used when project omits it", () => {
 	}
 });
 
+test("contextManagement merges global-first then project", () => {
+	const env = setupEnv();
+	try {
+		writeGlobal(env, { contextManagement: ["g1"] });
+		writeProject(env, { contextManagement: ["p1"] });
+		const cfg = load(env);
+		assert.deepEqual(cfg.contextManagement, ["g1", "p1"]);
+	} finally {
+		env.cleanup();
+	}
+});
+
 test("general merges global-first then project, dedup not applied (order preserved)", () => {
 	const env = setupEnv();
 	try {

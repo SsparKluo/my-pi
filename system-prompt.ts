@@ -3,7 +3,7 @@ import {
 	getAgentDir,
 	type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
-import { composeManagedPreamble } from "./system-prompt-core.ts";
+import { composeManagedPreamble, formatGeneralGuidelines, hasContextTools } from "./system-prompt-core.ts";
 import { loadConfig } from "./system-prompt-config.ts";
 import { detectEnvironment } from "./system-prompt-env.ts";
 
@@ -49,6 +49,12 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 				options.toolGuidelines[name] = [...existing, ...spec.guidelines];
 			}
 			options.promptGuidelines = [...options.promptGuidelines, ...config.general];
+			if (hasContextTools(options.selectedTools) && config.contextManagement.length > 0) {
+				options.sections = {
+					...options.sections,
+					context_management: formatGeneralGuidelines(config.contextManagement),
+				};
+			}
 			return { systemPrompt: event.systemPrompt };
 		}
 
@@ -58,6 +64,7 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 		options.customPrompt = composeManagedPreamble({
 			basePrompt: config.basePrompt,
 			general: config.general,
+			contextManagement: config.contextManagement,
 			selectedTools: options.selectedTools,
 			configuredTools: config.tools,
 			env: detectEnvironment(ctx.cwd),
