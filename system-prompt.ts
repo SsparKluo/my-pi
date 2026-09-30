@@ -3,11 +3,7 @@ import {
 	getAgentDir,
 	type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
-import {
-	formatEnvironment,
-	formatGeneralGuidelines,
-	formatToolGuidelines,
-} from "./system-prompt-core.ts";
+import { composeManagedPreamble } from "./system-prompt-core.ts";
 import { loadConfig } from "./system-prompt-config.ts";
 import { detectEnvironment } from "./system-prompt-env.ts";
 
@@ -56,16 +52,16 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 			return { systemPrompt: event.systemPrompt };
 		}
 
-		// basePrompt replaces Pi's preamble. customPrompt natively suppresses Pi's
-		// <tools>/<rules>/<docs>; AGENTS.md, skills, and cwd still render natively,
-		// and the configured overrides ride along as custom sections.
-		options.customPrompt = config.basePrompt;
-		options.sections = {
-			...options.sections,
-			general_guidelines: formatGeneralGuidelines(config.general),
-			tool_use: formatToolGuidelines(options.selectedTools, config.tools),
-			env: formatEnvironment(detectEnvironment(ctx.cwd)),
-		};
+		// Fold guidelines into customPrompt (the preamble) so they sit ABOVE Pi's
+		// native project_context/skills/cwd. options.sections always render after
+		// those, which buried the managed prompt at the bottom of the system message.
+		options.customPrompt = composeManagedPreamble({
+			basePrompt: config.basePrompt,
+			general: config.general,
+			selectedTools: options.selectedTools,
+			configuredTools: config.tools,
+			env: detectEnvironment(ctx.cwd),
+		});
 		return { systemPrompt: event.systemPrompt };
 	});
 }

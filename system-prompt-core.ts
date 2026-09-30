@@ -52,3 +52,30 @@ export function formatEnvironment(env: EnvironmentInfo): string {
 		`Platform: ${env.platform}`,
 	].join("\n");
 }
+
+function wrapSection(name: string, content: string): string {
+	const body = content.trim();
+	if (!body) return "";
+	return `<${name}>\n${body}\n</${name}>`;
+}
+
+/**
+ * Fold configured guidelines into the preamble so they render ABOVE Pi's native
+ * `<project_context>` / `<skills>` / `<cwd>`. Custom `options.sections` are
+ * appended after those native sections, which buried the managed prompt.
+ */
+export function composeManagedPreamble(args: {
+	basePrompt: string;
+	general: readonly string[];
+	selectedTools: readonly string[];
+	configuredTools: Readonly<Record<string, ToolPromptSpec>>;
+	env: EnvironmentInfo;
+}): string {
+	const parts = [args.basePrompt.trim()];
+	const general = wrapSection("general_guidelines", formatGeneralGuidelines(args.general));
+	if (general) parts.push(general);
+	const tools = wrapSection("tool_use", formatToolGuidelines(args.selectedTools, args.configuredTools));
+	if (tools) parts.push(tools);
+	parts.push(wrapSection("env", formatEnvironment(args.env)));
+	return parts.join("\n\n");
+}

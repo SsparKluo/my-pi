@@ -310,7 +310,7 @@ Full design (bash cascade, ask keybinds, classifier context): [`pi-mode/README.m
 
 | Field | Required | Meaning |
 |-------|----------|---------|
-| `basePrompt` | no | Persona / base text. Non-empty → replaces Pi's default preamble (Pi's native `<tools>`/`<rules>`/`<docs>` are suppressed); the configured sections below ride along. Absent → compose into Pi's native sections instead. |
+| `basePrompt` | no | Persona / base text. Non-empty → replaces Pi's default preamble (Pi's native `<tools>`/`<rules>`/`<docs>` are suppressed); configured guidelines are folded into that preamble so they sit above AGENTS.md/skills. Absent → compose into Pi's native sections instead. |
 | `general` | no | `string[]` of general guidelines |
 | `tools.<name>.snippet` | no | One-line override for that tool's line in Pi's native `<tools>` section (no-`basePrompt` path only; if present it must be non-empty) |
 | `tools.<name>.guidelines` | no | `string[]` of per-tool preferences |
@@ -330,10 +330,6 @@ Pi's own preamble, `<docs>`, AGENTS.md (`<project_context>`), skills, and `<cwd>
 ```text
 {basePrompt}                                     ← customPrompt; Pi's <tools>/<rules>/<docs> suppressed
 
-<project_context>…</project_context>             ← Pi native: AGENTS/CLAUDE files
-<skills>…</skills>                               ← Pi native: skill list (read/bash-aware loading hint)
-<cwd>…</cwd>                                     ← Pi native
-
 <general_guidelines>
 - …
 </general_guidelines>
@@ -348,7 +344,13 @@ Workspace root folder: …
 Is directory a git repo: yes|no
 Platform: …
 </env>
+
+<project_context>…</project_context>             ← Pi native: AGENTS/CLAUDE files
+<skills>…</skills>                               ← Pi native: skill list (read/bash-aware loading hint)
+<cwd>…</cwd>                                     ← Pi native
 ```
+
+Guidelines are folded into `customPrompt` (the preamble) so they sit at the top. Pi appends any `options.sections` *after* project_context/skills/cwd, which would bury them.
 
 `<tool_use>` holds one `- <tool>: <guideline>` line per configured guideline, in tool-loadout order; tools without guidelines (and tools outside the current loadout) don't appear. Configured `snippet`s are ignored on this path — schema restatements belong in the API `tools` param, not the prompt. Context files and skills are never rediscovered by this extension — they follow Pi's loader and flags.
 

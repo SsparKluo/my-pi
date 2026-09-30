@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+	composeManagedPreamble,
 	formatEnvironment,
 	formatGeneralGuidelines,
 	formatToolGuidelines,
@@ -47,6 +48,51 @@ test("formatGeneralGuidelines: bullets, dedupe, blanks dropped; empty input yiel
 
 test("uniqueGuidelines trims and preserves first-seen order", () => {
 	assert.deepEqual(uniqueGuidelines([" b ", "a", "b", ""]), ["b", "a"]);
+});
+
+test("composeManagedPreamble: guidelines sit in the preamble, before any later native sections", () => {
+	const out = composeManagedPreamble({
+		basePrompt: "You are an expert assistant.",
+		general: ["Be direct."],
+		selectedTools: ["read"],
+		configuredTools: { read: { guidelines: ["Use read over cat."] } },
+		env: { worktree: "/tmp/x", isGitRepo: true, platform: "linux" },
+	});
+	assert.equal(
+		out,
+		[
+			"You are an expert assistant.",
+			"",
+			"<general_guidelines>",
+			"- Be direct.",
+			"</general_guidelines>",
+			"",
+			"<tool_use>",
+			"- read: Use read over cat.",
+			"</tool_use>",
+			"",
+			"<env>",
+			"Workspace root folder: /tmp/x",
+			"Is directory a git repo: yes",
+			"Platform: linux",
+			"</env>",
+		].join("\n"),
+	);
+	assert.ok(out.startsWith("You are an expert assistant."));
+	assert.ok(out.indexOf("<general_guidelines>") < out.indexOf("<tool_use>"));
+});
+
+test("composeManagedPreamble: omits empty guideline sections", () => {
+	const out = composeManagedPreamble({
+		basePrompt: "Hello.",
+		general: [],
+		selectedTools: ["read"],
+		configuredTools: {},
+		env: { worktree: "/x", isGitRepo: false, platform: "linux" },
+	});
+	assert.equal(out.includes("<general_guidelines>"), false);
+	assert.equal(out.includes("<tool_use>"), false);
+	assert.ok(out.includes("<env>"));
 });
 
 test("formatEnvironment: three lines without cwd, backslashes normalized", () => {
