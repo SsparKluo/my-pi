@@ -26,6 +26,13 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 		// No config at all: leave Pi's prompt completely untouched.
 		if (config.absent) return undefined;
 
+		// Magic Context dreamer/historian children carry their task contract
+		// (XML manifest output format, tool discipline) as the forced system
+		// prompt. Composing our managed preamble over it makes those subagents
+		// emit unparseable manifests until every fallback model is exhausted.
+		// These are machine sessions — managed prompt config never applies.
+		if (process.env.MAGIC_CONTEXT_PI_SUBAGENT === "1") return undefined;
+
 		for (const error of config.errors) {
 			if (!warnedConfigErrors.has(error)) {
 				warnedConfigErrors.add(error);
