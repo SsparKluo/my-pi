@@ -14,6 +14,11 @@ import { detectEnvironment } from "./system-prompt-env.ts";
 const warnedConfigErrors = new Set<string>();
 
 export default function systemPromptExtension(pi: ExtensionAPI) {
+	// Returning { systemPrompt } (the forced-prompt path) matters: system-prompt
+	// injectors such as pi-magic-context stamp their own forced prompt, and the
+	// renderer short-circuits to forceSystemPrompt — mutations alone would never
+	// reach the request. We clear any stale force, mutate, then re-assert our
+	// render as the final forced text (later handlers' returns win in the runner).
 	pi.on("before_agent_start", async (event, ctx) => {
 		const config = loadConfig({
 			cwd: ctx.cwd,
@@ -34,6 +39,12 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 
 		const options = event.systemPromptOptions;
 
+		// A previous before_agent_start handler (e.g. pi-magic-context) may already
+		// have stamped a forced prompt rendered from the pre-mutation options. The
+		// renderer short-circuits to forceSystemPrompt, which would mask every
+		// mutation below; clear it so this handler's composition is what renders.
+		delete (options as { forceSystemPrompt?: string }).forceSystemPrompt;
+
 		// Without basePrompt, compose into Pi's native <tools>/<rules> sections.
 		if (!config.basePrompt) {
 			for (const [name, spec] of Object.entries(config.tools)) {
@@ -42,7 +53,7 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 				options.toolGuidelines[name] = [...existing, ...spec.guidelines];
 			}
 			options.promptGuidelines = [...options.promptGuidelines, ...config.general];
-			return undefined;
+			return { systemPrompt: event.systemPrompt };
 		}
 
 		// basePrompt replaces Pi's preamble. customPrompt natively suppresses Pi's
@@ -55,6 +66,6 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 			tool_use: formatToolGuidelines(options.selectedTools, config.tools),
 			env: formatEnvironment(detectEnvironment(ctx.cwd)),
 		};
-		return undefined;
+		return { systemPrompt: event.systemPrompt };
 	});
 }
