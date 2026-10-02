@@ -293,8 +293,10 @@ Full design (bash cascade, ask keybinds, classifier context): [`pi-mode/README.m
 {
 	"basePrompt": "You are a focused coding assistant. Follow the user's request and use the available tools when needed.",
 	"general": [
-		"Be concise in your responses.",
 		"Show file paths clearly when working with files."
+	],
+	"contextManagement": [
+		"Managing the workspace context is part of the job, not a separate pass afterwards."
 	],
 	"tools": {
 		"read": {
@@ -326,6 +328,7 @@ Full design (bash cascade, ask keybinds, classifier context): [`pi-mode/README.m
 - `tools.<name>.snippet` overrides that tool's line in Pi's native `<tools>` section
 - `tools.<name>.guidelines` join that tool's `toolGuidelines`, rendered as bullets in Pi's native `<rules>` section
 - `general` bullets append to `promptGuidelines` (also `<rules>`)
+- `contextManagement` renders as a `<context_management>` section appended after Pi's native sections (same `ctx_*` gating)
 
 Pi's own preamble, `<docs>`, AGENTS.md (`<project_context>`), skills, and `<cwd>` are untouched.
 
@@ -430,6 +433,7 @@ shortcuts.ts
 429-retry.ts
 startup-header.ts
 system-prompt.ts          # + system-prompt-{config,core,env}.ts
+tool-loadout.ts           # hide tools from the model → ~/.pi/agent/tool-loadout.json
 status/                   # footer, worked-for, auto-title, /statusline
 tool-display/             # render overrides + ~/.pi/agent/tool-display.json
 pi-mode/                  # vendored subtree → ~/.pi/agent/pi-mode-config.jsonc
