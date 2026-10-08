@@ -43,10 +43,10 @@ import {
 	countGrepMatches,
 	countLines,
 	countLsEntries,
+	countImageBlocks,
 	extractTextContent,
 	formatDisplayPath,
 	getDiffStats,
-	hasImageContent,
 	isErrorResult,
 	splitTrailingNoticeBlock,
 } from "./utils.ts";
@@ -257,6 +257,10 @@ function pluralize(count: number, singular: string, plural = `${singular}s`): st
 
 function formatLineCount(count: number): string {
 	return `${count} ${pluralize(count, "line")}`;
+}
+
+function formatImageCount(count: number): string {
+	return `${count} ${pluralize(count, "image")}`;
 }
 
 function warningLine(notice: string | undefined, theme: Theme): string | undefined {
@@ -562,8 +566,12 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 				}
 				// Image reads: the text is the attachment note; the image itself rides in
 				// result.content and is drawn by the component below these lines.
-				if (expanded && hasImageContent(result)) {
-					return padBlock(text(theme.fg("toolOutput", resultText)));
+				const imageCount = countImageBlocks(result);
+				if (imageCount > 0) {
+					if (expanded) {
+						return padBlock(text(theme.fg("toolOutput", resultText)));
+					}
+					return padBlock(text(theme.fg("muted", formatImageCount(imageCount))));
 				}
 				return padBlock(text(theme.fg("muted", formatLineCount(countLines(resultText)))));
 			},

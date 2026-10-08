@@ -52,9 +52,9 @@ export function extractTextContent(result: ToolResultLike | undefined): string {
 		.join("\n");
 }
 
-/** True when the result carries an image attachment block (read of an image file). */
-export function hasImageContent(result: ToolResultLike | undefined): boolean {
-	return (result?.content ?? []).some((block) => block.type === "image");
+/** Number of image attachment blocks in the result. */
+export function countImageBlocks(result: ToolResultLike | undefined): number {
+	return (result?.content ?? []).filter((block) => block.type === "image").length;
 }
 
 export function splitTrailingNoticeBlock(text: string): { body: string; notice?: string } {
