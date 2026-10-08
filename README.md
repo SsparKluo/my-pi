@@ -144,7 +144,7 @@ Expanded detail blocks hang under the call line behind a `└` corner:
      const ok = (name) => ({ name, isError: false });
 ```
 
-Click a member line to expand just that call; click the `└` footer to expand the whole batch (splits back into independent blocks). When `pi-rtk-optimizer` rewrites a Bash command, the final timing line appends `· rtk rewritten`. Does **not** touch user-message rendering.
+Click a member line to expand just that call; click the `└` footer to expand the whole batch (splits back into independent blocks). An expanded member draws its image attachments (`read` of a jpg/png/… shows the picture under the note text, same as solo expansion — requires terminal image support, kitty/sixel). When `pi-rtk-optimizer` rewrites a Bash command, the final timing line appends `· rtk rewritten`. Does **not** touch user-message rendering.
 
 ### Config: `~/.pi/agent/tool-display.json`
 

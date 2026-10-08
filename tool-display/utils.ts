@@ -52,6 +52,11 @@ export function extractTextContent(result: ToolResultLike | undefined): string {
 		.join("\n");
 }
 
+/** True when the result carries an image attachment block (read of an image file). */
+export function hasImageContent(result: ToolResultLike | undefined): boolean {
+	return (result?.content ?? []).some((block) => block.type === "image");
+}
+
 export function splitTrailingNoticeBlock(text: string): { body: string; notice?: string } {
 	const normalized = normalizeLineEndings(text);
 	const match = normalized.match(noticePattern);

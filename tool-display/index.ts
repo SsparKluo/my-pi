@@ -28,6 +28,7 @@ import {
 	GROUP_ARROW,
 	GROUP_CORNER,
 	GROUP_HANG,
+	imageBodyLines,
 	isCompactSummary,
 	joinCompactLine,
 	layoutGroup,
@@ -45,6 +46,7 @@ import {
 	extractTextContent,
 	formatDisplayPath,
 	getDiffStats,
+	hasImageContent,
 	isErrorResult,
 	splitTrailingNoticeBlock,
 } from "./utils.ts";
@@ -550,13 +552,18 @@ function registerOverrides(pi: ExtensionAPI, cwd: string, config: ToolDisplayCon
 				});
 				return callLine(theme, context, `${theme.fg("toolTitle", theme.bold("read"))} ${theme.fg("accent", displayPath)}`);
 			},
-			renderResult(result, { isPartial }, theme) {
+			renderResult(result, { expanded, isPartial }, theme) {
 				if (isPartial) {
 					return padBlock(text(theme.fg("muted", "loading...")));
 				}
 				const resultText = extractTextContent(result);
 				if (isErrorResult(result, resultText)) {
 					return padBlock(renderRawText(resultText, theme, true));
+				}
+				// Image reads: the text is the attachment note; the image itself rides in
+				// result.content and is drawn by the component below these lines.
+				if (expanded && hasImageContent(result)) {
+					return padBlock(text(theme.fg("toolOutput", resultText)));
 				}
 				return padBlock(text(theme.fg("muted", formatLineCount(countLines(resultText)))));
 			},
@@ -1342,7 +1349,15 @@ function renderGroupedRun(run: ToolComp[], width: number, theme: Theme): string[
 	for (const member of run) {
 		const titleWrapped = getCompact(member, theme, width).wrapped;
 		const dot = statusDot(theme, { isError: member.result?.isError, isPartial: member.isPartial });
-		members.push(member.expanded ? { dot, wrapped: [...titleWrapped, ...expandedBodies(member, theme, width)] } : { dot, wrapped: titleWrapped });
+		let detail: string[] = [];
+		if (member.expanded) {
+			detail = expandedBodies(member, theme, width);
+			// Grouped members bypass ToolExecutionComponent.render(), which is where pi
+			// draws image attachments (imageComponents); re-emit them under the text body.
+			const imageWidth = Math.max(width - toolBlockPadCols - GROUP_HANG, 1);
+			detail = [...detail, ...imageBodyLines(member.imageComponents ?? [], imageWidth)];
+		}
+		members.push(member.expanded ? { dot, wrapped: [...titleWrapped, ...detail] } : { dot, wrapped: titleWrapped });
 	}
 	const footer = formatGroupFooter(
 		run.map((member) => ({ name: member.toolName, isError: member.result?.isError })),

@@ -4,6 +4,7 @@ import {
 	GROUP_ARROW,
 	GROUP_HANG,
 	formatGroupFooter,
+	imageBodyLines,
 	joinCompactLine,
 	layoutGroup,
 	stripHangPad,
@@ -97,5 +98,17 @@ test("layoutGroup aligns wrapped member lines under the body column", () => {
 	assert.deepEqual(members, [
 		{ y: 0, height: 2 },
 		{ y: 2, height: 2 },
+	]);
+});
+
+test("imageBodyLines prepends a spacer row per image and preserves blank placeholder rows", () => {
+	assert.deepEqual(imageBodyLines([], 80), []);
+	const kitty = { render: (width) => [width === 76 ? "\x1b_Gkitty\x1b\\" : "wrong", "", ""] };
+	assert.deepEqual(imageBodyLines([kitty], 76), ["", "\x1b_Gkitty\x1b\\", "", ""]);
+	// Sixel rows are blank first with the sequence on the last row; neither may be stripped.
+	const sixel = { render: () => ["", "", "\x1b[2A\x1b[Pq..."] };
+	assert.deepEqual(imageBodyLines([kitty, sixel], 76), [
+		"", "\x1b_Gkitty\x1b\\", "", "",
+		"", "", "", "\x1b[2A\x1b[Pq...",
 	]);
 });

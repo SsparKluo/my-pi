@@ -129,6 +129,25 @@ export function joinCompactLine(callBody: string, summary: string | undefined, s
 	return `${callBody} ${separator} ${summary}`;
 }
 
+/**
+ * Image rows for an expanded group member, mirroring what
+ * ToolExecutionComponent.render() emits for self-shell tools: one blank
+ * spacer row, then the image component's rows. Kept out of the text body
+ * because image rows carry escape sequences and blank placeholder rows that
+ * must not be stripped or re-wrapped.
+ */
+export function imageBodyLines(
+	images: Array<{ render: (width: number) => string[] }>,
+	width: number,
+): string[] {
+	const lines: string[] = [];
+	for (const image of images) {
+		lines.push("");
+		lines.push(...image.render(width));
+	}
+	return lines;
+}
+
 export type GroupMemberLayout = {
 	/** First line y (0-based within the group block, excluding a leading blank). */
 	y: number;
